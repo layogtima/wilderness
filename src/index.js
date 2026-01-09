@@ -131,6 +131,23 @@ const grassMaterial = new THREE.ShaderMaterial({
   side: THREE.DoubleSide
 });
 
+
+
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(-50, 100, 50);
+scene.add(dirLight);
+
+// Fog & Background
+// Matching the sky color to a soft, foggy green-blue
+const skyColor = 0x62c1e5; 
+scene.background = new THREE.Color(skyColor);
+scene.fog = new THREE.FogExp2(skyColor, 0.0025);
+
+generateEnvironment();
 generateField();
 
 const animate = function () {
@@ -168,8 +185,7 @@ const animate = function () {
       canJump = true;
     }
 
-    // Map Boundaries (PLANE_SIZE is 30, so +/- 15)
-    // Adding a small buffer so you don't walk off the very edge
+    // Map Boundaries (PLANE_SIZE is 60, so +/- 30)
     const limit = PLANE_SIZE / 2; 
     if (camera.position.x < -limit) camera.position.x = -limit;
     if (camera.position.x > limit) camera.position.x = limit;
@@ -192,6 +208,136 @@ window.addEventListener('resize', () => {
 
 function convertRange (val, oldMin, oldMax, newMin, newMax) {
   return (((val - oldMin) * (newMax - newMin)) / (oldMax - oldMin)) + newMin;
+}
+
+function generateEnvironment() {
+  // 1. Rock Base (The Cliff we stand on)
+  const rockMaterial = new THREE.MeshLambertMaterial({ color: 0x556655 }); // More greenish-grey
+  const rockGeo = new THREE.CylinderBufferGeometry(PLANE_SIZE / 1.5, PLANE_SIZE / 1.2, 30, 8); // rougher shape
+  const rockMesh = new THREE.Mesh(rockGeo, rockMaterial);
+  rockMesh.position.y = -15.1; 
+  scene.add(rockMesh);
+
+  // 2. Distant Terrain (Improved Noise)
+  const worldWidth = 256;
+  const worldDepth = 256;
+  const terrainSize = 4000;
+  
+  const data = generateHeight(worldWidth, worldDepth);
+  const geometry = new THREE.PlaneBufferGeometry(terrainSize, terrainSize, worldWidth - 1, worldDepth - 1);
+  geometry.rotateX(-Math.PI / 2);
+
+  const vertices = geometry.attributes.position.array;
+  for (let i = 0, j = 0, l = vertices.length; i < l; i++, j += 3) {
+    // Scaling height
+    vertices[j + 1] = data[i] * 20; 
+  }
+  // Lower the terrain so its hills don't intersect our high platform
+  // Our platform is at y=0. We want hills to be visible but "below".
+  geometry.translate(0, -100, 0); 
+  
+  const texture = new THREE.CanvasTexture(generateTexture(data, worldWidth, worldDepth));
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map: texture }));
+  scene.add(mesh);
+}
+
+// ----------------------------------------------------------------------------
+// Helpers for Terrain Generation (adapted from THREE.js "webgl_geometry_terrain")
+// ----------------------------------------------------------------------------
+import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
+
+function generateHeight(width, height) {
+  let seed = Math.PI / 4;
+  const random = function () {
+    const x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+  };
+
+  const size = width * height;
+  const data = new Uint8Array(size);
+  const perlin = new ImprovedNoise();
+  const z = random() * 100;
+
+  let quality = 1;
+
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < size; i++) {
+      const x = i % width;
+      const y = ~~(i / width);
+      data[i] += Math.abs(perlin.noise(x / quality, y / quality, z) * quality * 1.75);
+    }
+    quality *= 5;
+  }
+  return data;
+}
+
+function generateTexture(data, width, height) {
+  let context, image, imageData, shade;
+  const vector3 = new THREE.Vector3(0, 0, 0);
+  const sun = new THREE.Vector3(1, 1, 1);
+  sun.normalize();
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+
+  context = canvas.getContext('2d');
+  context.fillStyle = '#000';
+  context.fillRect(0, 0, width, height);
+
+  image = context.getImageData(0, 0, canvas.width, canvas.height);
+  imageData = image.data;
+
+  for (let i = 0, j = 0, l = imageData.length; i < l; i += 4, j++) {
+    vector3.x = data[j - 2] - data[j + 2];
+    vector3.y = 2;
+    vector3.z = data[j - width * 2] - data[j + width * 2];
+    vector3.normalize();
+
+    shade = vector3.dot(sun);
+
+    // Color Palette: Greenish!
+    // Base Green: 34, 139, 34 (ForestGreen-ish)
+    // Variation based on height (data[j]) and Shade
+    
+    // High points (tips) lighter, low points darker
+    const r = 50 + shade * 50; 
+    const g = 120 + shade * 80 + data[j] * 0.5; // Green dominates
+    const b = 50 + shade * 50;
+    
+    imageData[i] = r;
+    imageData[i + 1] = g;
+    imageData[i + 2] = b;
+    imageData[i + 3] = 255;
+  }
+
+  context.putImageData(image, 0, 0);
+
+  // Scale up 4x for smoother look
+  const canvasScaled = document.createElement('canvas');
+  canvasScaled.width = width * 4;
+  canvasScaled.height = height * 4;
+
+  context = canvasScaled.getContext('2d');
+  context.scale(4, 4);
+  context.drawImage(canvas, 0, 0);
+
+  image = context.getImageData(0, 0, canvasScaled.width, canvasScaled.height);
+  imageData = image.data;
+
+  // Add noise
+  for (let i = 0, l = imageData.length; i < l; i += 4) {
+    const v = ~~(Math.random() * 5);
+    imageData[i] += v;
+    imageData[i + 1] += v;
+    imageData[i + 2] += v;
+  }
+
+  context.putImageData(image, 0, 0);
+  return canvasScaled;
 }
 
 function generateField () {
