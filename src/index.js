@@ -1,34 +1,111 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import grassShader from './shaders/grass.js';
+
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 // Parameters
-const PLANE_SIZE = 30;
-const BLADE_COUNT = 100000;
-const BLADE_WIDTH = 0.1;
-const BLADE_HEIGHT = 0.8;
-const BLADE_HEIGHT_VARIATION = 0.6;
+const PLANE_SIZE = 60;
+const BLADE_COUNT = 200000;
+const BLADE_WIDTH = 0.25;
+const BLADE_HEIGHT = 0.2;
+const BLADE_HEIGHT_VARIATION = 0.9;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 // Controls
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enablePan = false;
-controls.enableZoom = false;
-controls.minPolarAngle = 1.1;
-controls.maxPolarAngle = 1.45;
-controls.enableDamping = true;
-controls.dampingFactor = 0.1;
-controls.target.set(0, 0, 0);
+const controls = new PointerLockControls(camera, document.body);
 
-// Camera
-camera.position.set(-7, 3, 7);
-camera.lookAt(controls.target);
-camera.setFocalLength(15);
+const instructions = document.createElement('div');
+instructions.style.position = 'absolute';
+instructions.style.top = '50%';
+instructions.style.left = '50%';
+instructions.style.transform = 'translate(-50%, -50%)';
+instructions.style.color = 'white';
+instructions.style.fontFamily = 'sans-serif';
+instructions.style.fontSize = '24px';
+instructions.style.textAlign = 'center';
+instructions.style.pointerEvents = 'none';
+instructions.innerHTML = 'Click to Play<br>(WASD to move, Mouse to look)';
+document.body.appendChild(instructions);
+
+document.addEventListener('click', () => {
+  controls.lock();
+});
+
+controls.addEventListener('lock', () => {
+  instructions.style.display = 'none';
+});
+
+controls.addEventListener('unlock', () => {
+  instructions.style.display = 'block';
+});
+
+// Movement State
+let moveForward = false;
+let moveBackward = false;
+let moveLeft = false;
+let moveRight = false;
+let canJump = false;
+
+const velocity = new THREE.Vector3();
+const direction = new THREE.Vector3();
+
+const onKeyDown = function (event) {
+  switch (event.code) {
+    case 'ArrowUp':
+    case 'KeyW':
+      moveForward = true;
+      break;
+    case 'ArrowLeft':
+    case 'KeyA':
+      moveLeft = true;
+      break;
+    case 'ArrowDown':
+    case 'KeyS':
+      moveBackward = true;
+      break;
+    case 'ArrowRight':
+    case 'KeyD':
+      moveRight = true;
+      break;
+    case 'Space':
+      if (canJump === true) velocity.y += 25; // was 350
+      canJump = false;
+      break;
+  }
+};
+
+const onKeyUp = function (event) {
+  switch (event.code) {
+    case 'ArrowUp':
+    case 'KeyW':
+      moveForward = false;
+      break;
+    case 'ArrowLeft':
+    case 'KeyA':
+      moveLeft = false;
+      break;
+    case 'ArrowDown':
+    case 'KeyS':
+      moveBackward = false;
+      break;
+    case 'ArrowRight':
+    case 'KeyD':
+      moveRight = false;
+      break;
+  }
+};
+
+document.addEventListener('keydown', onKeyDown);
+document.addEventListener('keyup', onKeyUp);
+
+// Camera Initial Position
+camera.position.set(0, 5, 0); // Eye level
+camera.lookAt(0, 5, -10);
 
 // Grass Texture
 const grassTexture = new THREE.TextureLoader().load('grass.jpg');
@@ -38,6 +115,7 @@ cloudTexture.wrapS = cloudTexture.wrapT = THREE.RepeatWrapping;
 // Time Uniform
 const startTime = Date.now();
 const timeUniform = { type: 'f', value: 0.0 };
+let prevTime = performance.now();
 
 // Grass Shader
 const grassUniforms = {
@@ -56,10 +134,51 @@ const grassMaterial = new THREE.ShaderMaterial({
 generateField();
 
 const animate = function () {
+  requestAnimationFrame(animate);
+
+  const time = performance.now();
+  const delta = (time - prevTime) / 1000;
+  
   const elapsedTime = Date.now() - startTime;
-  controls.update();
   grassUniforms.iTime.value = elapsedTime;
-  window.requestAnimationFrame(animate);
+
+    // Movement Logic
+  if (controls.isLocked === true) {
+    velocity.x -= velocity.x * 10.0 * delta;
+    velocity.z -= velocity.z * 10.0 * delta;
+    velocity.y -= 9.8 * 1 * delta; // 100.0 = mass
+
+    direction.z = Number(moveForward) - Number(moveBackward);
+    direction.x = Number(moveRight) - Number(moveLeft);
+    direction.normalize();
+
+    // Slower Speed (was 400.0)
+    if (moveForward || moveBackward) velocity.z -= direction.z * 100.0 * delta;
+    if (moveLeft || moveRight) velocity.x -= direction.x * 100.0 * delta;
+
+    controls.moveRight(-velocity.x * delta);
+    controls.moveForward(-velocity.z * delta);
+
+    camera.position.y += (velocity.y * delta);
+
+    // Jump Physics (lower and slower)
+    if (camera.position.y < 1.5) {
+      velocity.y = 0;
+      camera.position.y = 1.5;
+      canJump = true;
+    }
+
+    // Map Boundaries (PLANE_SIZE is 30, so +/- 15)
+    // Adding a small buffer so you don't walk off the very edge
+    const limit = PLANE_SIZE / 2; 
+    if (camera.position.x < -limit) camera.position.x = -limit;
+    if (camera.position.x > limit) camera.position.x = limit;
+    if (camera.position.z < -limit) camera.position.z = -limit;
+    if (camera.position.z > limit) camera.position.z = limit;
+  }
+
+  prevTime = time;
+
   renderer.render(scene, camera);
 };
 
@@ -159,7 +278,7 @@ function generateBlade (center, vArrOffset, uv) {
     vArrOffset + 4,
     vArrOffset + 3,
     vArrOffset + 3,
-    vArrOffset,
+    vArrOffset + 1,
     vArrOffset + 2
   ];
 
