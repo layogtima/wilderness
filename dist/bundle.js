@@ -48288,14 +48288,7 @@
 	}
 
 	function generateEnvironment() {
-	  // 1. Rock Base (The Cliff we stand on)
-	  const rockMaterial = new MeshLambertMaterial({ color: 0x556655 }); // More greenish-grey
-	  const rockGeo = new CylinderBufferGeometry(PLANE_SIZE / 1.5, PLANE_SIZE / 1.2, 30, 8); // rougher shape
-	  const rockMesh = new Mesh(rockGeo, rockMaterial);
-	  rockMesh.position.y = -15.1; 
-	  scene.add(rockMesh);
-
-	  // 2. Distant Terrain (Improved Noise)
+	  // Rolling Hills Terrain at ground level
 	  const worldWidth = 256;
 	  const worldDepth = 256;
 	  const terrainSize = 4000;
@@ -48306,12 +48299,11 @@
 
 	  const vertices = geometry.attributes.position.array;
 	  for (let i = 0, j = 0, l = vertices.length; i < l; i++, j += 3) {
-	    // Scaling height
-	    vertices[j + 1] = data[i] * 20; 
+	    // Gentle rolling hills
+	    vertices[j + 1] = data[i] * 10; 
 	  }
-	  // Lower the terrain so its hills don't intersect our high platform
-	  // Our platform is at y=0. We want hills to be visible but "below".
-	  geometry.translate(0, -100, 0); 
+	  // Place terrain FAR below the grass plane as distant rolling landscape
+	  geometry.translate(1000, -900, 1000); 
 	  
 	  const texture = new CanvasTexture(generateTexture(data, worldWidth, worldDepth));
 	  texture.wrapS = ClampToEdgeWrapping;
