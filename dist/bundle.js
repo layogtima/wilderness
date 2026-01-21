@@ -48151,7 +48151,7 @@
 	instructions.style.fontSize = '24px';
 	instructions.style.textAlign = 'center';
 	instructions.style.pointerEvents = 'none';
-	instructions.innerHTML = 'Click to Play<br>(WASD to move, Mouse to look)';
+	instructions.innerHTML = 'Click to Play<br>(WASD to move, Mouse to look)<br>LMB: Raise terrain | RMB: Lower terrain<br>Scroll: Brush size';
 	document.body.appendChild(instructions);
 
 	document.addEventListener('click', () => {
@@ -48289,9 +48289,132 @@
 	const CLOUD_HEIGHT = 25;
 	const CLOUD_AREA = 400; // How far clouds extend
 
+	// Terrain sculpting system - GOD MODE! 🎨
+	let groundMesh = null;
+	let brushRadius = 3.0; // Adjustable brush size
+	const BRUSH_MIN = 1.0;
+	const BRUSH_MAX = 10.0;
+	const SCULPT_STRENGTH = 0.8; // How much terrain moves per click
+	const raycaster = new Raycaster();
+	let isMouseDown = false;
+	let sculptMode = 0; // 0 = none, 1 = raise, -1 = lower
+
+	// 3D Brush Cursor - ring that follows terrain
+	const cursorGeometry = new RingGeometry(0.9, 1.0, 32);
+	const cursorMaterial = new MeshBasicMaterial({
+	  color: 0xffffff,
+	  side: DoubleSide,
+	  transparent: true,
+	  opacity: 0.8,
+	  depthTest: false // Always visible on top
+	});
+	const brushCursor = new Mesh(cursorGeometry, cursorMaterial);
+	brushCursor.rotation.x = -Math.PI / 2; // Lay flat
+	brushCursor.visible = false;
+	scene.add(brushCursor);
+
+	function updateBrushCursor() {
+	  if (!groundMesh || !controls.isLocked) {
+	    brushCursor.visible = false;
+	    return;
+	  }
+	  
+	  // Raycast from camera center
+	  raycaster.setFromCamera(new Vector2(0, 0), camera);
+	  const intersects = raycaster.intersectObject(groundMesh);
+	  
+	  if (intersects.length > 0) {
+	    const hit = intersects[0];
+	    brushCursor.visible = true;
+	    brushCursor.position.copy(hit.point);
+	    brushCursor.position.y += 0.1; // Slightly above terrain
+	    
+	    // Scale to match brush radius
+	    brushCursor.scale.setScalar(brushRadius);
+	    
+	    // Color based on sculpt mode
+	    if (sculptMode === 1) {
+	      cursorMaterial.color.setHex(0x00ff00); // Green for raise
+	    } else if (sculptMode === -1) {
+	      cursorMaterial.color.setHex(0xff4444); // Red for lower
+	    } else {
+	      cursorMaterial.color.setHex(0xffffff); // White for neutral
+	    }
+	  } else {
+	    brushCursor.visible = false;
+	  }
+	}
+
+	// Brush UI
+	const brushUI = document.createElement('div');
+	brushUI.style.position = 'absolute';
+	brushUI.style.bottom = '20px';
+	brushUI.style.left = '50%';
+	brushUI.style.transform = 'translateX(-50%)';
+	brushUI.style.color = 'white';
+	brushUI.style.fontFamily = 'sans-serif';
+	brushUI.style.fontSize = '16px';
+	brushUI.style.textAlign = 'center';
+	brushUI.style.padding = '10px 20px';
+	brushUI.style.background = 'rgba(0,0,0,0.5)';
+	brushUI.style.borderRadius = '10px';
+	brushUI.style.display = 'none';
+	brushUI.style.pointerEvents = 'none';
+	document.body.appendChild(brushUI);
+
+	function updateBrushUI() {
+	  brushUI.innerHTML = `🎨 Brush Size: ${brushRadius.toFixed(1)} | LMB: Raise ⬆️ | RMB: Lower ⬇️`;
+	}
+	updateBrushUI();
+
+	// Show/hide brush UI based on controls lock
+	controls.addEventListener('lock', () => {
+	  brushUI.style.display = 'block';
+	  brushCursor.visible = true;
+	});
+	controls.addEventListener('unlock', () => {
+	  brushUI.style.display = 'none';
+	  brushCursor.visible = false;
+	});
+
 	generateEnvironment();
 	generateField();
 	generateClouds();
+
+	// Sculpting mouse handlers
+	document.addEventListener('mousedown', (event) => {
+	  if (!controls.isLocked) return;
+	  
+	  if (event.button === 0) {
+	    sculptMode = 1; // Left click = raise
+	    isMouseDown = true;
+	  } else if (event.button === 2) {
+	    sculptMode = -1; // Right click = lower
+	    isMouseDown = true;
+	  }
+	});
+
+	document.addEventListener('mouseup', (event) => {
+	  if (event.button === 0 || event.button === 2) {
+	    isMouseDown = false;
+	    sculptMode = 0;
+	  }
+	});
+
+	// Scroll wheel for brush size
+	document.addEventListener('wheel', (event) => {
+	  if (!controls.isLocked) return;
+	  
+	  // Scroll up = bigger brush, scroll down = smaller
+	  brushRadius -= event.deltaY * 0.005;
+	  brushRadius = Math.max(BRUSH_MIN, Math.min(BRUSH_MAX, brushRadius));
+	  updateBrushUI();
+	});
+
+	// Prevent right-click context menu
+	document.addEventListener('contextmenu', (event) => {
+	  if (controls.isLocked) event.preventDefault();
+	});
 
 	const animate = function () {
 	  requestAnimationFrame(animate);
@@ -48331,9 +48454,22 @@
 
 	    camera.position.y += (velocity.y * delta);
 
-	    // Terrain following - get ground height at current position
-	    const groundHeight = getTerrainHeight(camera.position.x, camera.position.z, PLANE_SIZE / 2);
+	    // Terrain following - raycast down to find actual sculpted ground height
 	    const playerHeight = 1.5; // Eye level above ground
+	    let groundHeight = 0;
+	    
+	    if (groundMesh) {
+	      // Create a ray pointing straight down from above the player
+	      const rayOrigin = new Vector3(camera.position.x, 50, camera.position.z);
+	      const rayDirection = new Vector3(0, -1, 0);
+	      const groundRaycaster = new Raycaster(rayOrigin, rayDirection);
+	      
+	      const hits = groundRaycaster.intersectObject(groundMesh);
+	      if (hits.length > 0) {
+	        groundHeight = hits[0].point.y;
+	      }
+	    }
+	    
 	    const targetY = groundHeight + playerHeight;
 	    
 	    // Jump Physics - land on terrain
@@ -48351,6 +48487,14 @@
 	    if (camera.position.z > limit) camera.position.z = limit;
 	  }
 
+	  // Sculpt terrain while mouse is held
+	  if (isMouseDown && sculptMode !== 0) {
+	    sculptTerrain(sculptMode);
+	  }
+	  
+	  // Update brush cursor position
+	  updateBrushCursor();
+	  
 	  prevTime = time;
 
 	  renderer.render(scene, camera);
@@ -48400,9 +48544,59 @@
 	  geometry.computeVertexNormals();
 	  
 	  // Use shader material with cloud shadows
-	  const mesh = new Mesh(geometry, groundMaterial);
-	  mesh.position.y = -0.05; // Slightly below grass roots
-	  scene.add(mesh);
+	  groundMesh = new Mesh(geometry, groundMaterial);
+	  groundMesh.position.y = -0.05; // Slightly below grass roots
+	  scene.add(groundMesh);
+	}
+
+	// ----------------------------------------------------------------------------
+	// Terrain Sculpting System - Paint your own landscape!
+	// ----------------------------------------------------------------------------
+
+	function sculptTerrain(direction) {
+	  if (!groundMesh) return;
+	  
+	  // Cast ray from camera center (crosshair)
+	  raycaster.setFromCamera(new Vector2(0, 0), camera);
+	  
+	  const intersects = raycaster.intersectObject(groundMesh);
+	  
+	  if (intersects.length > 0) {
+	    const hitPoint = intersects[0].point;
+	    
+	    // Get geometry and vertices
+	    const geometry = groundMesh.geometry;
+	    const positions = geometry.attributes.position.array;
+	    
+	    // Sculpt at the hit location
+	    for (let i = 0; i < positions.length; i += 3) {
+	      const vx = positions[i];
+	      positions[i + 1];
+	      const vz = positions[i + 2];
+	      
+	      // Calculate distance from hit point (in xz plane)
+	      const dx = vx - hitPoint.x;
+	      const dz = vz - hitPoint.z;
+	      const distance = Math.sqrt(dx * dx + dz * dz);
+	      
+	      // Only affect vertices within brush radius
+	      if (distance < brushRadius) {
+	        // Smooth falloff - stronger in center, weaker at edges
+	        const falloff = 1 - (distance / brushRadius);
+	        const smoothFalloff = falloff * falloff; // Quadratic for smooth sculpting
+	        
+	        // Raise or lower based on direction
+	        positions[i + 1] += direction * SCULPT_STRENGTH * smoothFalloff;
+	        
+	        // Clamp height to reasonable bounds
+	        positions[i + 1] = Math.max(-5, Math.min(15, positions[i + 1]));
+	      }
+	    }
+	    
+	    // Mark geometry as needing update
+	    geometry.attributes.position.needsUpdate = true;
+	    geometry.computeVertexNormals();
+	  }
 	}
 
 	// ----------------------------------------------------------------------------
