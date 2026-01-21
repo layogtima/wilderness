@@ -1,6 +1,38 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import grassShader from './shaders/grass.js';
+import groundShader from './shaders/ground.js';
+
+// Shared Perlin noise instance for terrain
+const terrainPerlin = new ImprovedNoise();
+const TERRAIN_NOISE_SCALE = 0.05; // Slightly larger features
+const TERRAIN_HEIGHT_SCALE = 8.0; // MUCH more dramatic hills!
+const TERRAIN_PLATEAU_HEIGHT = 2.0; // Higher base dome
+const GRASS_HEIGHT_THRESHOLD = 3.5; // No grass above this height (bare peaks!)
+
+// Get terrain height at any x,z position
+function getTerrainHeight(x, z, radius) {
+  const distFromCenter = Math.sqrt(x * x + z * z) / radius;
+  
+  // Generate noise-based height - main rolling hills
+  let height = terrainPerlin.noise(x * TERRAIN_NOISE_SCALE, z * TERRAIN_NOISE_SCALE, 0.5) * TERRAIN_HEIGHT_SCALE;
+  
+  // Add a second layer of medium bumps
+  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 2.5, z * TERRAIN_NOISE_SCALE * 2.5, 1.0) * (TERRAIN_HEIGHT_SCALE * 0.5);
+  
+  // Add a third layer of small detail bumps
+  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 6, z * TERRAIN_NOISE_SCALE * 6, 2.0) * (TERRAIN_HEIGHT_SCALE * 0.15);
+  
+  // Smooth falloff at edges
+  const edgeFalloff = 1 - Math.pow(Math.min(distFromCenter, 1), 2);
+  height *= edgeFalloff;
+  
+  // Add dome/plateau base shape
+  const plateauHeight = (1 - distFromCenter * distFromCenter) * TERRAIN_PLATEAU_HEIGHT;
+  
+  return Math.max(0, height + plateauHeight);
+}
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -131,6 +163,20 @@ const grassMaterial = new THREE.ShaderMaterial({
   side: THREE.DoubleSide
 });
 
+// Ground Shader (shares cloud texture with grass)
+const groundUniforms = {
+  cloudTexture: { value: cloudTexture },
+  groundColor: { value: new THREE.Color(0x8B6914) }, // Mud brown
+  iTime: timeUniform
+};
+
+const groundMaterial = new THREE.ShaderMaterial({
+  uniforms: groundUniforms,
+  vertexShader: groundShader.vert,
+  fragmentShader: groundShader.frag,
+  side: THREE.DoubleSide
+});
+
 
 
 // Lighting
@@ -178,10 +224,15 @@ const animate = function () {
 
     camera.position.y += (velocity.y * delta);
 
-    // Jump Physics (lower and slower)
-    if (camera.position.y < 1.5) {
+    // Terrain following - get ground height at current position
+    const groundHeight = getTerrainHeight(camera.position.x, camera.position.z, PLANE_SIZE / 2);
+    const playerHeight = 1.5; // Eye level above ground
+    const targetY = groundHeight + playerHeight;
+    
+    // Jump Physics - land on terrain
+    if (camera.position.y < targetY) {
       velocity.y = 0;
-      camera.position.y = 1.5;
+      camera.position.y = targetY;
       canJump = true;
     }
 
@@ -211,126 +262,45 @@ function convertRange (val, oldMin, oldMax, newMin, newMax) {
 }
 
 function generateEnvironment() {
-  // Rolling Hills Terrain at ground level
-  const worldWidth = 256;
-  const worldDepth = 256;
-  const terrainSize = 4000;
+  // Create a high-subdivision plane for smooth terrain
+  const radius = PLANE_SIZE / 2;
+  const subdivisions = 128; // High subdivision for smooth rolling hills
   
-  const data = generateHeight(worldWidth, worldDepth);
-  const geometry = new THREE.PlaneBufferGeometry(terrainSize, terrainSize, worldWidth - 1, worldDepth - 1);
+  // Use PlaneBufferGeometry with proper subdivisions
+  const geometry = new THREE.PlaneBufferGeometry(
+    PLANE_SIZE, PLANE_SIZE, 
+    subdivisions, subdivisions
+  );
   geometry.rotateX(-Math.PI / 2);
-
+  
+  // Apply terrain height and clip to circle
   const vertices = geometry.attributes.position.array;
-  for (let i = 0, j = 0, l = vertices.length; i < l; i++, j += 3) {
-    // Gentle rolling hills
-    vertices[j + 1] = data[i] * 10; 
+  
+  for (let i = 0; i < vertices.length; i += 3) {
+    const x = vertices[i];
+    const z = vertices[i + 2];
+    const distFromCenter = Math.sqrt(x * x + z * z);
+    
+    // Only apply height within the circular area
+    if (distFromCenter <= radius) {
+      vertices[i + 1] = getTerrainHeight(x, z, radius);
+    } else {
+      // Push vertices outside circle down below view
+      vertices[i + 1] = -100;
+    }
   }
-  // Place terrain FAR below the grass plane as distant rolling landscape
-  geometry.translate(1000, -900, 1000); 
   
-  const texture = new THREE.CanvasTexture(generateTexture(data, worldWidth, worldDepth));
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
+  geometry.computeVertexNormals();
   
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map: texture }));
+  // Use shader material with cloud shadows
+  const mesh = new THREE.Mesh(geometry, groundMaterial);
+  mesh.position.y = -0.05; // Slightly below grass roots
   scene.add(mesh);
 }
 
 // ----------------------------------------------------------------------------
-// Helpers for Terrain Generation (adapted from THREE.js "webgl_geometry_terrain")
+// Grass Field Generation
 // ----------------------------------------------------------------------------
-import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
-
-function generateHeight(width, height) {
-  let seed = Math.PI / 4;
-  const random = function () {
-    const x = Math.sin(seed++) * 10000;
-    return x - Math.floor(x);
-  };
-
-  const size = width * height;
-  const data = new Uint8Array(size);
-  const perlin = new ImprovedNoise();
-  const z = random() * 100;
-
-  let quality = 1;
-
-  for (let j = 0; j < 4; j++) {
-    for (let i = 0; i < size; i++) {
-      const x = i % width;
-      const y = ~~(i / width);
-      data[i] += Math.abs(perlin.noise(x / quality, y / quality, z) * quality * 1.75);
-    }
-    quality *= 5;
-  }
-  return data;
-}
-
-function generateTexture(data, width, height) {
-  let context, image, imageData, shade;
-  const vector3 = new THREE.Vector3(0, 0, 0);
-  const sun = new THREE.Vector3(1, 1, 1);
-  sun.normalize();
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-
-  context = canvas.getContext('2d');
-  context.fillStyle = '#000';
-  context.fillRect(0, 0, width, height);
-
-  image = context.getImageData(0, 0, canvas.width, canvas.height);
-  imageData = image.data;
-
-  for (let i = 0, j = 0, l = imageData.length; i < l; i += 4, j++) {
-    vector3.x = data[j - 2] - data[j + 2];
-    vector3.y = 2;
-    vector3.z = data[j - width * 2] - data[j + width * 2];
-    vector3.normalize();
-
-    shade = vector3.dot(sun);
-
-    // Color Palette: Greenish!
-    // Base Green: 34, 139, 34 (ForestGreen-ish)
-    // Variation based on height (data[j]) and Shade
-    
-    // High points (tips) lighter, low points darker
-    const r = 50 + shade * 50; 
-    const g = 120 + shade * 80 + data[j] * 0.5; // Green dominates
-    const b = 50 + shade * 50;
-    
-    imageData[i] = r;
-    imageData[i + 1] = g;
-    imageData[i + 2] = b;
-    imageData[i + 3] = 255;
-  }
-
-  context.putImageData(image, 0, 0);
-
-  // Scale up 4x for smoother look
-  const canvasScaled = document.createElement('canvas');
-  canvasScaled.width = width * 4;
-  canvasScaled.height = height * 4;
-
-  context = canvasScaled.getContext('2d');
-  context.scale(4, 4);
-  context.drawImage(canvas, 0, 0);
-
-  image = context.getImageData(0, 0, canvasScaled.width, canvasScaled.height);
-  imageData = image.data;
-
-  // Add noise
-  for (let i = 0, l = imageData.length; i < l; i += 4) {
-    const v = ~~(Math.random() * 5);
-    imageData[i] += v;
-    imageData[i + 1] += v;
-    imageData[i + 2] += v;
-  }
-
-  context.putImageData(image, 0, 0);
-  return canvasScaled;
-}
 
 function generateField () {
   const positions = [];
@@ -338,7 +308,14 @@ function generateField () {
   const indices = [];
   const colors = [];
 
-  for (let i = 0; i < BLADE_COUNT; i++) {
+  let bladesGenerated = 0;
+  const targetBlades = BLADE_COUNT;
+  let attempts = 0;
+  const maxAttempts = BLADE_COUNT * 3; // Prevent infinite loop
+  
+  while (bladesGenerated < targetBlades && attempts < maxAttempts) {
+    attempts++;
+    
     const VERTEX_COUNT = 5;
     const surfaceMin = PLANE_SIZE / 2 * -1;
     const surfaceMax = PLANE_SIZE / 2;
@@ -347,19 +324,36 @@ function generateField () {
     const r = radius * Math.sqrt(Math.random());
     const theta = Math.random() * 2 * Math.PI;
     const x = r * Math.cos(theta);
-    const y = r * Math.sin(theta);
+    const z = r * Math.sin(theta);
+    
+    // Use shared terrain height function
+    const finalHeight = getTerrainHeight(x, z, radius);
+    
+    // Skip grass on high peaks (bare mud!) with fuzzy transition
+    const heightThreshold = GRASS_HEIGHT_THRESHOLD + (Math.random() - 0.5) * 1.5;
+    if (finalHeight > heightThreshold) {
+      continue; // No grass here - bare peak!
+    }
+    
+    // Additional random thinning for less uniformity
+    // Grass is denser in valleys, sparser on slopes
+    const slopeNoise = terrainPerlin.noise(x * 0.15, z * 0.15, 5.0);
+    if (Math.random() > 0.7 + slopeNoise * 0.3) {
+      continue; // Random thin out for natural look
+    }
 
-    const pos = new THREE.Vector3(x, 0, y);
+    const pos = new THREE.Vector3(x, finalHeight, z);
 
     const uv = [convertRange(pos.x, surfaceMin, surfaceMax, 0, 1), convertRange(pos.z, surfaceMin, surfaceMax, 0, 1)];
 
-    const blade = generateBlade(pos, i * VERTEX_COUNT, uv);
+    const blade = generateBlade(pos, bladesGenerated * VERTEX_COUNT, uv);
     blade.verts.forEach(vert => {
       positions.push(...vert.pos);
       uvs.push(...vert.uv);
       colors.push(...vert.color);
     });
     blade.indices.forEach(indice => indices.push(indice));
+    bladesGenerated++;
   }
 
   const geom = new THREE.BufferGeometry();
