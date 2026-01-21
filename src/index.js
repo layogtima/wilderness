@@ -3,6 +3,7 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import grassShader from './shaders/grass.js';
 import groundShader from './shaders/ground.js';
+import cloudShader from './shaders/cloud.js';
 
 // Shared Perlin noise instance for terrain
 const terrainPerlin = new ImprovedNoise();
@@ -11,18 +12,21 @@ const TERRAIN_HEIGHT_SCALE = 8.0; // MUCH more dramatic hills!
 const TERRAIN_PLATEAU_HEIGHT = 2.0; // Higher base dome
 const GRASS_HEIGHT_THRESHOLD = 3.5; // No grass above this height (bare peaks!)
 
+// Random terrain seed - changes every refresh!
+const TERRAIN_SEED = Math.random() * 1000;
+
 // Get terrain height at any x,z position
 function getTerrainHeight(x, z, radius) {
   const distFromCenter = Math.sqrt(x * x + z * z) / radius;
   
-  // Generate noise-based height - main rolling hills
-  let height = terrainPerlin.noise(x * TERRAIN_NOISE_SCALE, z * TERRAIN_NOISE_SCALE, 0.5) * TERRAIN_HEIGHT_SCALE;
+  // Generate noise-based height - main rolling hills (with random seed offset)
+  let height = terrainPerlin.noise(x * TERRAIN_NOISE_SCALE + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE, 0.5) * TERRAIN_HEIGHT_SCALE;
   
   // Add a second layer of medium bumps
-  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 2.5, z * TERRAIN_NOISE_SCALE * 2.5, 1.0) * (TERRAIN_HEIGHT_SCALE * 0.5);
+  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 2.5 + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE * 2.5, 1.0) * (TERRAIN_HEIGHT_SCALE * 0.5);
   
   // Add a third layer of small detail bumps
-  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 6, z * TERRAIN_NOISE_SCALE * 6, 2.0) * (TERRAIN_HEIGHT_SCALE * 0.15);
+  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 6 + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE * 6, 2.0) * (TERRAIN_HEIGHT_SCALE * 0.15);
   
   // Smooth falloff at edges
   const edgeFalloff = 1 - Math.pow(Math.min(distFromCenter, 1), 2);
@@ -193,8 +197,15 @@ const skyColor = 0x62c1e5;
 scene.background = new THREE.Color(skyColor);
 scene.fog = new THREE.FogExp2(skyColor, 0.0025);
 
+// Cloud tracking for animation
+const cloudMeshes = [];
+const CLOUD_SPEED = { x: 0.5, z: 0.25 }; // Units per second
+const CLOUD_HEIGHT = 25;
+const CLOUD_AREA = 400; // How far clouds extend
+
 generateEnvironment();
 generateField();
+generateClouds();
 
 const animate = function () {
   requestAnimationFrame(animate);
@@ -204,6 +215,16 @@ const animate = function () {
   
   const elapsedTime = Date.now() - startTime;
   grassUniforms.iTime.value = elapsedTime;
+  
+  // Animate clouds overhead
+  cloudMeshes.forEach(cloud => {
+    cloud.position.x += CLOUD_SPEED.x * delta;
+    cloud.position.z += CLOUD_SPEED.z * delta;
+    
+    // Wrap clouds around when they go too far
+    if (cloud.position.x > CLOUD_AREA / 2) cloud.position.x = -CLOUD_AREA / 2;
+    if (cloud.position.z > CLOUD_AREA / 2) cloud.position.z = -CLOUD_AREA / 2;
+  });
 
     // Movement Logic
   if (controls.isLocked === true) {
@@ -415,4 +436,45 @@ function generateBlade (center, vArrOffset, uv) {
   ];
 
   return { verts, indices };
+}
+
+// ----------------------------------------------------------------------------
+// 3D Cloud Generation - Visible clouds that match the shadow texture!
+// ----------------------------------------------------------------------------
+
+function generateClouds() {
+  const cloudGeometry = new THREE.PlaneBufferGeometry(150, 150);
+  
+  // Create multiple cloud layers at different heights and positions
+  const cloudConfigs = [
+    { x: 0, y: CLOUD_HEIGHT, z: 0, scale: 1.0, opacity: 0.7 },
+    { x: -80, y: CLOUD_HEIGHT + 15, z: -40, scale: 1.2, opacity: 0.6 },
+    { x: 60, y: CLOUD_HEIGHT + 8, z: 50, scale: 0.9, opacity: 0.65 },
+    { x: -30, y: CLOUD_HEIGHT + 20, z: 80, scale: 1.1, opacity: 0.55 },
+    { x: 100, y: CLOUD_HEIGHT + 5, z: -60, scale: 1.3, opacity: 0.6 },
+    { x: -100, y: CLOUD_HEIGHT + 12, z: 30, scale: 1.0, opacity: 0.7 },
+  ];
+  
+  cloudConfigs.forEach(config => {
+    // Custom shader material - makes light areas transparent!
+    const cloudMat = new THREE.ShaderMaterial({
+      uniforms: {
+        cloudTexture: { value: cloudTexture },
+        opacity: { value: config.opacity }
+      },
+      vertexShader: cloudShader.vert,
+      fragmentShader: cloudShader.frag,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    
+    const cloud = new THREE.Mesh(cloudGeometry, cloudMat);
+    cloud.rotation.x = -Math.PI / 2; // Face down
+    cloud.position.set(config.x, config.y, config.z);
+    cloud.scale.setScalar(config.scale);
+    
+    scene.add(cloud);
+    cloudMeshes.push(cloud);
+  });
 }

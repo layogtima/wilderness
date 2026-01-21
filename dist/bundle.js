@@ -48073,17 +48073,23 @@
 
 	};
 
-	var vert$1 = "varying vec2 vUv;\r\nvarying vec2 cloudUV;\r\n\r\nvarying vec3 vColor;\r\nuniform float iTime;\r\n\r\nvoid main() {\r\n  vUv = uv;\r\n  cloudUV = uv;\r\n  vColor = color;\r\n  vec3 cpos = position;\r\n\r\n  float waveSize = 10.0f;\r\n  float tipDistance = 0.3f;\r\n  float centerDistance = 0.1f;\r\n\r\n  if (color.x > 0.6f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * tipDistance;\r\n  }else if (color.x > 0.0f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * centerDistance;\r\n  }\r\n\r\n  float diff = position.x - cpos.x;\r\n  cloudUV.x += iTime / 20000.;\r\n  cloudUV.y += iTime / 10000.;\r\n\r\n  vec4 worldPosition = vec4(cpos, 1.);\r\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(cpos, 1.0);\r\n  gl_Position = mvPosition;\r\n}\r\n";
+	var vert$2 = "varying vec2 vUv;\r\nvarying vec2 cloudUV;\r\n\r\nvarying vec3 vColor;\r\nuniform float iTime;\r\n\r\nvoid main() {\r\n  vUv = uv;\r\n  cloudUV = uv;\r\n  vColor = color;\r\n  vec3 cpos = position;\r\n\r\n  float waveSize = 10.0f;\r\n  float tipDistance = 0.3f;\r\n  float centerDistance = 0.1f;\r\n\r\n  if (color.x > 0.6f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * tipDistance;\r\n  }else if (color.x > 0.0f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * centerDistance;\r\n  }\r\n\r\n  float diff = position.x - cpos.x;\r\n  cloudUV.x += iTime / 20000.;\r\n  cloudUV.y += iTime / 10000.;\r\n\r\n  vec4 worldPosition = vec4(cpos, 1.);\r\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(cpos, 1.0);\r\n  gl_Position = mvPosition;\r\n}\r\n";
 
-	var frag$1 = "uniform sampler2D texture1;\r\nuniform sampler2D textures[4];\r\n\r\nvarying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\n\r\nvoid main() {\r\n  float contrast = 1.5;\r\n  float brightness = 0.1;\r\n  vec3 color = texture2D(textures[0], vUv).rgb * contrast;\r\n  color = color + vec3(brightness, brightness, brightness);\r\n  color = mix(color, texture2D(textures[1], cloudUV).rgb, 0.4);\r\n  gl_FragColor.rgb = color;\r\n  gl_FragColor.a = 1.;\r\n}\r\n";
+	var frag$2 = "uniform sampler2D texture1;\r\nuniform sampler2D textures[4];\r\n\r\nvarying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\n\r\nvoid main() {\r\n  float contrast = 1.5;\r\n  float brightness = 0.1;\r\n  vec3 color = texture2D(textures[0], vUv).rgb * contrast;\r\n  color = color + vec3(brightness, brightness, brightness);\r\n  color = mix(color, texture2D(textures[1], cloudUV).rgb, 0.4);\r\n  gl_FragColor.rgb = color;\r\n  gl_FragColor.a = 1.;\r\n}\r\n";
 
-	var grassShader = { frag: frag$1, vert: vert$1 };
+	var grassShader = { frag: frag$2, vert: vert$2 };
 
-	var vert = "varying vec2 vUv;\nvarying vec2 cloudUV;\nvarying vec3 vNormal;\n\nuniform float iTime;\n\nvoid main() {\n  vUv = uv;\n  vNormal = normalize(normalMatrix * normal);\n  \n  // Cloud shadow UV - scrolls over time like the grass\n  cloudUV = uv * 2.0; // Scale for ground coverage\n  cloudUV.x += iTime / 20000.0;\n  cloudUV.y += iTime / 10000.0;\n\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n  gl_Position = mvPosition;\n}\n";
+	var vert$1 = "varying vec2 vUv;\nvarying vec2 cloudUV;\nvarying vec3 vNormal;\nvarying vec3 vWorldPosition;\n\nuniform float iTime;\n\nvoid main() {\n  vUv = uv;\n  vNormal = normalize(normalMatrix * normal);\n  \n  // Get world position for cloud shadow calculation\n  vec4 worldPos = modelMatrix * vec4(position, 1.0);\n  vWorldPosition = worldPos.xyz;\n  \n  // Cloud shadow UV based on world position (syncs with grass)\n  // Scale matches the grass UV range (PLANE_SIZE = 60, so -30 to 30)\n  cloudUV = worldPos.xz / 60.0 + 0.5;\n  cloudUV.x += iTime / 20000.0;\n  cloudUV.y += iTime / 10000.0;\n\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n  gl_Position = mvPosition;\n}\n";
 
-	var frag = "uniform sampler2D cloudTexture;\nuniform vec3 groundColor;\nuniform float iTime;\n\nvarying vec2 vUv;\nvarying vec2 cloudUV;\nvarying vec3 vNormal;\n\nvoid main() {\n  // Base mud color\n  vec3 color = groundColor;\n  \n  // Simple diffuse lighting\n  vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));\n  float diffuse = max(dot(vNormal, lightDir), 0.0);\n  color *= 0.6 + diffuse * 0.5;\n  \n  // Mix in cloud shadows (same as grass shader)\n  vec3 cloudShadow = texture2D(cloudTexture, cloudUV).rgb;\n  color = mix(color, color * cloudShadow, 0.4);\n  \n  gl_FragColor.rgb = color;\n  gl_FragColor.a = 1.0;\n}\n";
+	var frag$1 = "uniform sampler2D cloudTexture;\nuniform vec3 groundColor;\nuniform float iTime;\n\nvarying vec2 vUv;\nvarying vec2 cloudUV;\nvarying vec3 vNormal;\n\nvoid main() {\n  // Base mud color\n  vec3 color = groundColor;\n  \n  // Simple diffuse lighting\n  vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));\n  float diffuse = max(dot(vNormal, lightDir), 0.0);\n  color *= 0.6 + diffuse * 0.5;\n  \n  // Mix in cloud shadows (same as grass shader)\n  vec3 cloudShadow = texture2D(cloudTexture, cloudUV).rgb;\n  color = mix(color, color * cloudShadow, 0.4);\n  \n  gl_FragColor.rgb = color;\n  gl_FragColor.a = 1.0;\n}\n";
 
-	var groundShader = { frag, vert };
+	var groundShader = { frag: frag$1, vert: vert$1 };
+
+	var vert = "varying vec2 vUv;\n\nvoid main() {\n  vUv = uv;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}\n";
+
+	var frag = "uniform sampler2D cloudTexture;\nuniform float opacity;\n\nvarying vec2 vUv;\n\nvoid main() {\n  vec4 texColor = texture2D(cloudTexture, vUv);\n  \n  // Convert to grayscale to determine cloud density\n  float gray = (texColor.r + texColor.g + texColor.b) / 3.0;\n  \n  // Invert and use as alpha - darker areas = more cloud = more opaque\n  // Light/white areas = sky = transparent\n  float cloudAlpha = 1.0 - gray;\n  \n  // Boost the contrast so clouds are more defined\n  cloudAlpha = smoothstep(0.1, 0.6, cloudAlpha);\n  \n  // Apply base opacity\n  cloudAlpha *= opacity;\n  \n  // Cloud color - soft white with slight blue tint\n  vec3 cloudColor = vec3(1.0, 1.0, 1.0);\n  \n  gl_FragColor = vec4(cloudColor, cloudAlpha);\n}\n";
+
+	var cloudShader = { frag, vert };
 
 	// Shared Perlin noise instance for terrain
 	const terrainPerlin = new ImprovedNoise();
@@ -48092,18 +48098,21 @@
 	const TERRAIN_PLATEAU_HEIGHT = 2.0; // Higher base dome
 	const GRASS_HEIGHT_THRESHOLD = 3.5; // No grass above this height (bare peaks!)
 
+	// Random terrain seed - changes every refresh!
+	const TERRAIN_SEED = Math.random() * 1000;
+
 	// Get terrain height at any x,z position
 	function getTerrainHeight(x, z, radius) {
 	  const distFromCenter = Math.sqrt(x * x + z * z) / radius;
 	  
-	  // Generate noise-based height - main rolling hills
-	  let height = terrainPerlin.noise(x * TERRAIN_NOISE_SCALE, z * TERRAIN_NOISE_SCALE, 0.5) * TERRAIN_HEIGHT_SCALE;
+	  // Generate noise-based height - main rolling hills (with random seed offset)
+	  let height = terrainPerlin.noise(x * TERRAIN_NOISE_SCALE + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE, 0.5) * TERRAIN_HEIGHT_SCALE;
 	  
 	  // Add a second layer of medium bumps
-	  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 2.5, z * TERRAIN_NOISE_SCALE * 2.5, 1.0) * (TERRAIN_HEIGHT_SCALE * 0.5);
+	  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 2.5 + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE * 2.5, 1.0) * (TERRAIN_HEIGHT_SCALE * 0.5);
 	  
 	  // Add a third layer of small detail bumps
-	  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 6, z * TERRAIN_NOISE_SCALE * 6, 2.0) * (TERRAIN_HEIGHT_SCALE * 0.15);
+	  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 6 + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE * 6, 2.0) * (TERRAIN_HEIGHT_SCALE * 0.15);
 	  
 	  // Smooth falloff at edges
 	  const edgeFalloff = 1 - Math.pow(Math.min(distFromCenter, 1), 2);
@@ -48274,8 +48283,15 @@
 	scene.background = new Color(skyColor);
 	scene.fog = new FogExp2(skyColor, 0.0025);
 
+	// Cloud tracking for animation
+	const cloudMeshes = [];
+	const CLOUD_SPEED = { x: 0.5, z: 0.25 }; // Units per second
+	const CLOUD_HEIGHT = 25;
+	const CLOUD_AREA = 400; // How far clouds extend
+
 	generateEnvironment();
 	generateField();
+	generateClouds();
 
 	const animate = function () {
 	  requestAnimationFrame(animate);
@@ -48285,6 +48301,16 @@
 	  
 	  const elapsedTime = Date.now() - startTime;
 	  grassUniforms.iTime.value = elapsedTime;
+	  
+	  // Animate clouds overhead
+	  cloudMeshes.forEach(cloud => {
+	    cloud.position.x += CLOUD_SPEED.x * delta;
+	    cloud.position.z += CLOUD_SPEED.z * delta;
+	    
+	    // Wrap clouds around when they go too far
+	    if (cloud.position.x > CLOUD_AREA / 2) cloud.position.x = -CLOUD_AREA / 2;
+	    if (cloud.position.z > CLOUD_AREA / 2) cloud.position.z = -CLOUD_AREA / 2;
+	  });
 
 	    // Movement Logic
 	  if (controls.isLocked === true) {
@@ -48496,6 +48522,47 @@
 	  ];
 
 	  return { verts, indices };
+	}
+
+	// ----------------------------------------------------------------------------
+	// 3D Cloud Generation - Visible clouds that match the shadow texture!
+	// ----------------------------------------------------------------------------
+
+	function generateClouds() {
+	  const cloudGeometry = new PlaneBufferGeometry(150, 150);
+	  
+	  // Create multiple cloud layers at different heights and positions
+	  const cloudConfigs = [
+	    { x: 0, y: CLOUD_HEIGHT, z: 0, scale: 1.0, opacity: 0.7 },
+	    { x: -80, y: CLOUD_HEIGHT + 15, z: -40, scale: 1.2, opacity: 0.6 },
+	    { x: 60, y: CLOUD_HEIGHT + 8, z: 50, scale: 0.9, opacity: 0.65 },
+	    { x: -30, y: CLOUD_HEIGHT + 20, z: 80, scale: 1.1, opacity: 0.55 },
+	    { x: 100, y: CLOUD_HEIGHT + 5, z: -60, scale: 1.3, opacity: 0.6 },
+	    { x: -100, y: CLOUD_HEIGHT + 12, z: 30, scale: 1.0, opacity: 0.7 },
+	  ];
+	  
+	  cloudConfigs.forEach(config => {
+	    // Custom shader material - makes light areas transparent!
+	    const cloudMat = new ShaderMaterial({
+	      uniforms: {
+	        cloudTexture: { value: cloudTexture },
+	        opacity: { value: config.opacity }
+	      },
+	      vertexShader: cloudShader.vert,
+	      fragmentShader: cloudShader.frag,
+	      transparent: true,
+	      side: DoubleSide,
+	      depthWrite: false
+	    });
+	    
+	    const cloud = new Mesh(cloudGeometry, cloudMat);
+	    cloud.rotation.x = -Math.PI / 2; // Face down
+	    cloud.position.set(config.x, config.y, config.z);
+	    cloud.scale.setScalar(config.scale);
+	    
+	    scene.add(cloud);
+	    cloudMeshes.push(cloud);
+	  });
 	}
 
 })();
