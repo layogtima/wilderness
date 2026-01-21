@@ -48073,9 +48073,9 @@
 
 	};
 
-	var vert$2 = "varying vec2 vUv;\r\nvarying vec2 cloudUV;\r\n\r\nvarying vec3 vColor;\r\nuniform float iTime;\r\n\r\nvoid main() {\r\n  vUv = uv;\r\n  cloudUV = uv;\r\n  vColor = color;\r\n  vec3 cpos = position;\r\n\r\n  float waveSize = 10.0f;\r\n  float tipDistance = 0.3f;\r\n  float centerDistance = 0.1f;\r\n\r\n  if (color.x > 0.6f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * tipDistance;\r\n  }else if (color.x > 0.0f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * centerDistance;\r\n  }\r\n\r\n  float diff = position.x - cpos.x;\r\n  cloudUV.x += iTime / 20000.;\r\n  cloudUV.y += iTime / 10000.;\r\n\r\n  vec4 worldPosition = vec4(cpos, 1.);\r\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(cpos, 1.0);\r\n  gl_Position = mvPosition;\r\n}\r\n";
+	var vert$2 = "varying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\nvarying float vWorldY; // Pass world Y position to fragment shader\r\n\r\nuniform float iTime;\r\n\r\nvoid main() {\r\n  vUv = uv;\r\n  cloudUV = uv;\r\n  vColor = color;\r\n  vec3 cpos = position;\r\n\r\n  float waveSize = 10.0f;\r\n  float tipDistance = 0.3f;\r\n  float centerDistance = 0.1f;\r\n\r\n  if (color.x > 0.6f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * tipDistance;\r\n  }else if (color.x > 0.0f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * centerDistance;\r\n  }\r\n\r\n  float diff = position.x - cpos.x;\r\n  cloudUV.x += iTime / 20000.;\r\n  cloudUV.y += iTime / 10000.;\r\n\r\n  // Calculate world position for height-based effects\r\n  vec4 worldPos = modelMatrix * vec4(cpos, 1.0);\r\n  vWorldY = worldPos.y;\r\n\r\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(cpos, 1.0);\r\n  gl_Position = mvPosition;\r\n}\r\n";
 
-	var frag$2 = "uniform sampler2D texture1;\r\nuniform sampler2D textures[4];\r\n\r\nvarying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\n\r\nvoid main() {\r\n  float contrast = 1.5;\r\n  float brightness = 0.1;\r\n  vec3 color = texture2D(textures[0], vUv).rgb * contrast;\r\n  color = color + vec3(brightness, brightness, brightness);\r\n  color = mix(color, texture2D(textures[1], cloudUV).rgb, 0.4);\r\n  gl_FragColor.rgb = color;\r\n  gl_FragColor.a = 1.;\r\n}\r\n";
+	var frag$2 = "uniform sampler2D texture1;\r\nuniform sampler2D textures[4];\r\nuniform float grassMinHeight; // Height below which grass disappears\r\n\r\nvarying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\nvarying float vWorldY;\r\n\r\nvoid main() {\r\n  // Discard grass below minimum height (in canyons)\r\n  // Use hard discard, no transparency issues\r\n  if (vWorldY < grassMinHeight) {\r\n    discard;\r\n  }\r\n  \r\n  float contrast = 1.5;\r\n  float brightness = 0.1;\r\n  vec3 color = texture2D(textures[0], vUv).rgb * contrast;\r\n  color = color + vec3(brightness, brightness, brightness);\r\n  color = mix(color, texture2D(textures[1], cloudUV).rgb, 0.4);\r\n  \r\n  gl_FragColor.rgb = color;\r\n  gl_FragColor.a = 1.0;\r\n}\r\n";
 
 	var grassShader = { frag: frag$2, vert: vert$2 };
 
@@ -48151,7 +48151,7 @@
 	instructions.style.fontSize = '24px';
 	instructions.style.textAlign = 'center';
 	instructions.style.pointerEvents = 'none';
-	instructions.innerHTML = 'Click to Play<br>(WASD to move, Mouse to look)<br>LMB: Raise terrain | RMB: Lower terrain<br>Scroll: Brush size';
+	instructions.innerHTML = 'Click to Play<br>(WASD to move, Mouse to look)<br>LMB: Raise | RMB: Lower | Scroll: Size<br>G: Regrow grass';
 	document.body.appendChild(instructions);
 
 	document.addEventListener('click', () => {
@@ -48198,6 +48198,10 @@
 	      if (canJump === true) velocity.y += 25; // was 350
 	      canJump = false;
 	      break;
+	    case 'KeyG':
+	      // Regenerate grass based on sculpted terrain
+	      regenerateGrassAsync();
+	      break;
 	  }
 	};
 
@@ -48240,9 +48244,13 @@
 	let prevTime = performance.now();
 
 	// Grass Shader
+	// GRASS_CANYON_THRESHOLD - grass disappears below this height
+	const GRASS_CANYON_THRESHOLD = -2.0; // Only hide grass in really deep canyons
+
 	const grassUniforms = {
 	  textures: { value: [grassTexture, cloudTexture] },
-	  iTime: timeUniform
+	  iTime: timeUniform,
+	  grassMinHeight: { value: GRASS_CANYON_THRESHOLD }
 	};
 
 	const grassMaterial = new ShaderMaterial({
@@ -48291,6 +48299,7 @@
 
 	// Terrain sculpting system - GOD MODE! 🎨
 	let groundMesh = null;
+	let grassMesh = null; // Reference to grass for regeneration
 	let brushRadius = 3.0; // Adjustable brush size
 	const BRUSH_MIN = 1.0;
 	const BRUSH_MAX = 10.0;
@@ -48298,6 +48307,7 @@
 	const raycaster = new Raycaster();
 	let isMouseDown = false;
 	let sculptMode = 0; // 0 = none, 1 = raise, -1 = lower
+	let isRegeneratingGrass = false;
 
 	// 3D Brush Cursor - ring that follows terrain
 	const cursorGeometry = new RingGeometry(0.9, 1.0, 32);
@@ -48378,7 +48388,7 @@
 	});
 
 	generateEnvironment();
-	generateField();
+	grassMesh = generateField();
 	generateClouds();
 
 	// Sculpting mouse handlers
@@ -48492,6 +48502,9 @@
 	    sculptTerrain(sculptMode);
 	  }
 	  
+	  // NOTE: Auto grass regeneration disabled - too heavy, crashes browser
+	  // The grass stays as originally generated
+	  
 	  // Update brush cursor position
 	  updateBrushCursor();
 	  
@@ -48603,16 +48616,47 @@
 	// Grass Field Generation
 	// ----------------------------------------------------------------------------
 
-	function generateField () {
+	// Get height from actual terrain mesh vertices (fast, no raycasting!)
+	function getActualTerrainHeight(x, z) {
+	  if (!groundMesh) {
+	    return getTerrainHeight(x, z, PLANE_SIZE / 2);
+	  }
+	  
+	  // Sample from terrain mesh vertices directly (much faster than raycasting)
+	  const positions = groundMesh.geometry.attributes.position.array;
+	  const gridSize = 129; // subdivisions + 1
+	  const cellSize = PLANE_SIZE / 128;
+	  
+	  // Convert world x,z to grid indices
+	  const gridX = Math.floor((x + PLANE_SIZE / 2) / cellSize);
+	  const gridZ = Math.floor((z + PLANE_SIZE / 2) / cellSize);
+	  
+	  // Clamp to valid range
+	  const clampedX = Math.max(0, Math.min(gridSize - 1, gridX));
+	  const clampedZ = Math.max(0, Math.min(gridSize - 1, gridZ));
+	  
+	  // Get vertex index (y is at position i*3 + 1)
+	  const vertexIndex = clampedZ * gridSize + clampedX;
+	  const yIndex = vertexIndex * 3 + 1;
+	  
+	  if (yIndex < positions.length) {
+	    return positions[yIndex] + groundMesh.position.y;
+	  }
+	  
+	  return getTerrainHeight(x, z, PLANE_SIZE / 2);
+	}
+
+	function generateField(useSculptedTerrain = false) {
 	  const positions = [];
 	  const uvs = [];
 	  const indices = [];
 	  const colors = [];
 
 	  let bladesGenerated = 0;
-	  const targetBlades = BLADE_COUNT;
+	  // Use WAY fewer blades when regenerating to avoid browser hang
+	  const targetBlades = useSculptedTerrain ? 50000 : BLADE_COUNT;
 	  let attempts = 0;
-	  const maxAttempts = BLADE_COUNT * 3; // Prevent infinite loop
+	  const maxAttempts = targetBlades * 2;
 	  
 	  while (bladesGenerated < targetBlades && attempts < maxAttempts) {
 	    attempts++;
@@ -48627,8 +48671,10 @@
 	    const x = r * Math.cos(theta);
 	    const z = r * Math.sin(theta);
 	    
-	    // Use shared terrain height function
-	    const finalHeight = getTerrainHeight(x, z, radius);
+	    // Use sculpted terrain or procedural based on flag
+	    const finalHeight = useSculptedTerrain 
+	      ? getActualTerrainHeight(x, z)
+	      : getTerrainHeight(x, z, radius);
 	    
 	    // Skip grass on high peaks (bare mud!) with fuzzy transition
 	    const heightThreshold = GRASS_HEIGHT_THRESHOLD + (Math.random() - 0.5) * 1.5;
@@ -48636,8 +48682,12 @@
 	      continue; // No grass here - bare peak!
 	    }
 	    
+	    // Skip grass below canyon threshold
+	    if (finalHeight < GRASS_CANYON_THRESHOLD) {
+	      continue; // Too low - canyon floor!
+	    }
+	    
 	    // Additional random thinning for less uniformity
-	    // Grass is denser in valleys, sparser on slopes
 	    const slopeNoise = terrainPerlin.noise(x * 0.15, z * 0.15, 5.0);
 	    if (Math.random() > 0.7 + slopeNoise * 0.3) {
 	      continue; // Random thin out for natural look
@@ -48667,6 +48717,105 @@
 
 	  const mesh = new Mesh(geom, grassMaterial);
 	  scene.add(mesh);
+	  
+	  return mesh; // Return reference for regeneration
+	}
+
+	// Async chunked grass regeneration - spreads work across frames to prevent freezing
+	const REGEN_BLADES_PER_FRAME = 2000; // Generate this many blades per frame
+	const REGEN_TOTAL_BLADES = 30000; // Total blades when regenerating (fewer for performance)
+
+	function regenerateGrassAsync() {
+	  if (isRegeneratingGrass) return; // Already regenerating
+	  
+	  console.log('🌿 Starting async grass regeneration...');
+	  isRegeneratingGrass = true;
+	  
+	  // Remove old grass
+	  if (grassMesh) {
+	    scene.remove(grassMesh);
+	    grassMesh.geometry.dispose();
+	    grassMesh = null;
+	  }
+	  
+	  // State for chunked generation
+	  const positions = [];
+	  const uvs = [];
+	  const indices = [];
+	  const colors = [];
+	  let bladesGenerated = 0;
+	  let attempts = 0;
+	  const maxAttempts = REGEN_TOTAL_BLADES * 2;
+	  
+	  function generateChunk() {
+	    performance.now();
+	    const bladesToGenerate = Math.min(REGEN_BLADES_PER_FRAME, REGEN_TOTAL_BLADES - bladesGenerated);
+	    let bladesThisChunk = 0;
+	    
+	    while (bladesThisChunk < bladesToGenerate && attempts < maxAttempts) {
+	      attempts++;
+	      
+	      const VERTEX_COUNT = 5;
+	      const surfaceMin = PLANE_SIZE / 2 * -1;
+	      const surfaceMax = PLANE_SIZE / 2;
+	      const radius = PLANE_SIZE / 2;
+
+	      const r = radius * Math.sqrt(Math.random());
+	      const theta = Math.random() * 2 * Math.PI;
+	      const x = r * Math.cos(theta);
+	      const z = r * Math.sin(theta);
+	      
+	      // Get height from sculpted terrain
+	      const finalHeight = getActualTerrainHeight(x, z);
+	      
+	      // Skip grass on high peaks
+	      const heightThreshold = GRASS_HEIGHT_THRESHOLD + (Math.random() - 0.5) * 1.5;
+	      if (finalHeight > heightThreshold) continue;
+	      
+	      // Skip grass below canyon threshold
+	      if (finalHeight < GRASS_CANYON_THRESHOLD) continue;
+	      
+	      // Random thinning
+	      const slopeNoise = terrainPerlin.noise(x * 0.15, z * 0.15, 5.0);
+	      if (Math.random() > 0.7 + slopeNoise * 0.3) continue;
+
+	      const pos = new Vector3(x, finalHeight, z);
+	      const uv = [convertRange(pos.x, surfaceMin, surfaceMax, 0, 1), convertRange(pos.z, surfaceMin, surfaceMax, 0, 1)];
+
+	      const blade = generateBlade(pos, bladesGenerated * VERTEX_COUNT, uv);
+	      blade.verts.forEach(vert => {
+	        positions.push(...vert.pos);
+	        uvs.push(...vert.uv);
+	        colors.push(...vert.color);
+	      });
+	      blade.indices.forEach(indice => indices.push(indice));
+	      bladesGenerated++;
+	      bladesThisChunk++;
+	    }
+	    
+	    // Check if done
+	    if (bladesGenerated >= REGEN_TOTAL_BLADES || attempts >= maxAttempts) {
+	      // Finalize mesh
+	      const geom = new BufferGeometry();
+	      geom.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+	      geom.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+	      geom.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
+	      geom.setIndex(indices);
+	      geom.computeVertexNormals();
+	      
+	      grassMesh = new Mesh(geom, grassMaterial);
+	      scene.add(grassMesh);
+	      
+	      isRegeneratingGrass = false;
+	      console.log(`🌿 Grass regenerated! ${bladesGenerated} blades`);
+	    } else {
+	      // Continue next frame
+	      requestAnimationFrame(generateChunk);
+	    }
+	  }
+	  
+	  // Start generating
+	  requestAnimationFrame(generateChunk);
 	}
 
 	function generateBlade (center, vArrOffset, uv) {
