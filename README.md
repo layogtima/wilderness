@@ -1,3 +1,15 @@
-# ThreeJS Grass Demo
+# Terrainator :D
 
-A simple demo showing stylized grass blowing in the wind.
+This is a demo of a lush, infinite grassy terrain with dynamic cloud shadows and interactive elements.
+
+## Features
+- **Terrain**: Rolling hills.
+- **Dynamic Grass**: Optimized grass rendering using instanced mesh and custom shaders.
+- **Cloud Shadows**: Real-time cloud shadows affecting the lighting of the grass.
+- **Interactive**: Move around and explore the "Terrainator".
+
+## Controls
+- **WASD / Arrow Keys**: Move camera
+- **Mouse**: Look around
+- **Click**: Dig usage (coming soon!)
+- **G**: Regrow grass

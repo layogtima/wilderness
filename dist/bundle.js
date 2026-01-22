@@ -95,8 +95,6 @@
 	}
 
 	const REVISION = '120';
-	const MOUSE = { LEFT: 0, MIDDLE: 1, RIGHT: 2, ROTATE: 0, DOLLY: 1, PAN: 2 };
-	const TOUCH = { ROTATE: 0, PAN: 1, DOLLY_PAN: 2, DOLLY_ROTATE: 3 };
 	const CullFaceNone = 0;
 	const CullFaceBack = 1;
 	const CullFaceFront = 2;
@@ -24808,7 +24806,7 @@
 			state.scissor( _currentScissor.copy( _scissor ).multiplyScalar( _pixelRatio ).floor() );
 			state.viewport( _currentViewport.copy( _viewport ).multiplyScalar( _pixelRatio ).floor() );
 
-			info = new WebGLInfo( _gl );
+			info = new WebGLInfo();
 			properties = new WebGLProperties();
 			textures = new WebGLTextures( _gl, extensions, state, properties, capabilities, utils, info );
 			cubemaps = new WebGLCubeMaps( _this );
@@ -42442,396 +42440,6 @@
 	new Vector3();
 	new Vector3();
 
-	class Audio extends Object3D {
-
-		constructor( listener ) {
-
-			super();
-
-			this.type = 'Audio';
-
-			this.listener = listener;
-			this.context = listener.context;
-
-			this.gain = this.context.createGain();
-			this.gain.connect( listener.getInput() );
-
-			this.autoplay = false;
-
-			this.buffer = null;
-			this.detune = 0;
-			this.loop = false;
-			this.loopStart = 0;
-			this.loopEnd = 0;
-			this.offset = 0;
-			this.duration = undefined;
-			this.playbackRate = 1;
-			this.isPlaying = false;
-			this.hasPlaybackControl = true;
-			this.source = null;
-			this.sourceType = 'empty';
-
-			this._startedAt = 0;
-			this._progress = 0;
-			this._connected = false;
-
-			this.filters = [];
-
-		}
-
-		getOutput() {
-
-			return this.gain;
-
-		}
-
-		setNodeSource( audioNode ) {
-
-			this.hasPlaybackControl = false;
-			this.sourceType = 'audioNode';
-			this.source = audioNode;
-			this.connect();
-
-			return this;
-
-		}
-
-		setMediaElementSource( mediaElement ) {
-
-			this.hasPlaybackControl = false;
-			this.sourceType = 'mediaNode';
-			this.source = this.context.createMediaElementSource( mediaElement );
-			this.connect();
-
-			return this;
-
-		}
-
-		setMediaStreamSource( mediaStream ) {
-
-			this.hasPlaybackControl = false;
-			this.sourceType = 'mediaStreamNode';
-			this.source = this.context.createMediaStreamSource( mediaStream );
-			this.connect();
-
-			return this;
-
-		}
-
-		setBuffer( audioBuffer ) {
-
-			this.buffer = audioBuffer;
-			this.sourceType = 'buffer';
-
-			if ( this.autoplay ) this.play();
-
-			return this;
-
-		}
-
-		play( delay ) {
-
-			if ( delay === undefined ) delay = 0;
-
-			if ( this.isPlaying === true ) {
-
-				console.warn( 'THREE.Audio: Audio is already playing.' );
-				return;
-
-			}
-
-			if ( this.hasPlaybackControl === false ) {
-
-				console.warn( 'THREE.Audio: this Audio has no playback control.' );
-				return;
-
-			}
-
-			this._startedAt = this.context.currentTime + delay;
-
-			const source = this.context.createBufferSource();
-			source.buffer = this.buffer;
-			source.loop = this.loop;
-			source.loopStart = this.loopStart;
-			source.loopEnd = this.loopEnd;
-			source.onended = this.onEnded.bind( this );
-			source.start( this._startedAt, this._progress + this.offset, this.duration );
-
-			this.isPlaying = true;
-
-			this.source = source;
-
-			this.setDetune( this.detune );
-			this.setPlaybackRate( this.playbackRate );
-
-			return this.connect();
-
-		}
-
-		pause() {
-
-			if ( this.hasPlaybackControl === false ) {
-
-				console.warn( 'THREE.Audio: this Audio has no playback control.' );
-				return;
-
-			}
-
-			if ( this.isPlaying === true ) {
-
-				// update current progress
-
-				this._progress += Math.max( this.context.currentTime - this._startedAt, 0 ) * this.playbackRate;
-
-				if ( this.loop === true ) {
-
-					// ensure _progress does not exceed duration with looped audios
-
-					this._progress = this._progress % ( this.duration || this.buffer.duration );
-
-				}
-
-				this.source.stop();
-				this.source.onended = null;
-
-				this.isPlaying = false;
-
-			}
-
-			return this;
-
-		}
-
-		stop() {
-
-			if ( this.hasPlaybackControl === false ) {
-
-				console.warn( 'THREE.Audio: this Audio has no playback control.' );
-				return;
-
-			}
-
-			this._progress = 0;
-
-			this.source.stop();
-			this.source.onended = null;
-			this.isPlaying = false;
-
-			return this;
-
-		}
-
-		connect() {
-
-			if ( this.filters.length > 0 ) {
-
-				this.source.connect( this.filters[ 0 ] );
-
-				for ( let i = 1, l = this.filters.length; i < l; i ++ ) {
-
-					this.filters[ i - 1 ].connect( this.filters[ i ] );
-
-				}
-
-				this.filters[ this.filters.length - 1 ].connect( this.getOutput() );
-
-			} else {
-
-				this.source.connect( this.getOutput() );
-
-			}
-
-			this._connected = true;
-
-			return this;
-
-		}
-
-		disconnect() {
-
-			if ( this.filters.length > 0 ) {
-
-				this.source.disconnect( this.filters[ 0 ] );
-
-				for ( let i = 1, l = this.filters.length; i < l; i ++ ) {
-
-					this.filters[ i - 1 ].disconnect( this.filters[ i ] );
-
-				}
-
-				this.filters[ this.filters.length - 1 ].disconnect( this.getOutput() );
-
-			} else {
-
-				this.source.disconnect( this.getOutput() );
-
-			}
-
-			this._connected = false;
-
-			return this;
-
-		}
-
-		getFilters() {
-
-			return this.filters;
-
-		}
-
-		setFilters( value ) {
-
-			if ( ! value ) value = [];
-
-			if ( this._connected === true ) {
-
-				this.disconnect();
-				this.filters = value;
-				this.connect();
-
-			} else {
-
-				this.filters = value;
-
-			}
-
-			return this;
-
-		}
-
-		setDetune( value ) {
-
-			this.detune = value;
-
-			if ( this.source.detune === undefined ) return; // only set detune when available
-
-			if ( this.isPlaying === true ) {
-
-				this.source.detune.setTargetAtTime( this.detune, this.context.currentTime, 0.01 );
-
-			}
-
-			return this;
-
-		}
-
-		getDetune() {
-
-			return this.detune;
-
-		}
-
-		getFilter() {
-
-			return this.getFilters()[ 0 ];
-
-		}
-
-		setFilter( filter ) {
-
-			return this.setFilters( filter ? [ filter ] : [] );
-
-		}
-
-		setPlaybackRate( value ) {
-
-			if ( this.hasPlaybackControl === false ) {
-
-				console.warn( 'THREE.Audio: this Audio has no playback control.' );
-				return;
-
-			}
-
-			this.playbackRate = value;
-
-			if ( this.isPlaying === true ) {
-
-				this.source.playbackRate.setTargetAtTime( this.playbackRate, this.context.currentTime, 0.01 );
-
-			}
-
-			return this;
-
-		}
-
-		getPlaybackRate() {
-
-			return this.playbackRate;
-
-		}
-
-		onEnded() {
-
-			this.isPlaying = false;
-
-		}
-
-		getLoop() {
-
-			if ( this.hasPlaybackControl === false ) {
-
-				console.warn( 'THREE.Audio: this Audio has no playback control.' );
-				return false;
-
-			}
-
-			return this.loop;
-
-		}
-
-		setLoop( value ) {
-
-			if ( this.hasPlaybackControl === false ) {
-
-				console.warn( 'THREE.Audio: this Audio has no playback control.' );
-				return;
-
-			}
-
-			this.loop = value;
-
-			if ( this.isPlaying === true ) {
-
-				this.source.loop = this.loop;
-
-			}
-
-			return this;
-
-		}
-
-		setLoopStart( value ) {
-
-			this.loopStart = value;
-
-			return this;
-
-		}
-
-		setLoopEnd( value ) {
-
-			this.loopEnd = value;
-
-			return this;
-
-		}
-
-		getVolume() {
-
-			return this.gain.gain.value;
-
-		}
-
-		setVolume( value ) {
-
-			this.gain.gain.setTargetAtTime( value, this.context.currentTime, 0.01 );
-
-			return this;
-
-		}
-
-	}
-
 	new Vector3();
 	new Quaternion();
 	new Vector3();
@@ -45666,29 +45274,6 @@
 
 	} );
 
-	class Uniform {
-
-		constructor( value ) {
-
-			if ( typeof value === 'string' ) {
-
-				console.warn( 'THREE.Uniform: Type parameter is no longer needed.' );
-				value = arguments[ 1 ];
-
-			}
-
-			this.value = value;
-
-		}
-
-		clone() {
-
-			return new Uniform( this.value.clone === undefined ? this.value : this.value.clone() );
-
-		}
-
-	}
-
 	function InstancedInterleavedBuffer( array, stride, meshPerAttribute ) {
 
 		InterleavedBuffer.call( this, array, stride );
@@ -45938,89 +45523,6 @@
 		}
 
 	} );
-
-	/**
-	 * Ref: https://en.wikipedia.org/wiki/Spherical_coordinate_system
-	 *
-	 * The polar angle (phi) is measured from the positive y-axis. The positive y-axis is up.
-	 * The azimuthal angle (theta) is measured from the positive z-axis.
-	 */
-
-	class Spherical {
-
-		constructor( radius = 1, phi = 0, theta = 0 ) {
-
-			this.radius = radius;
-			this.phi = phi; // polar angle
-			this.theta = theta; // azimuthal angle
-
-			return this;
-
-		}
-
-		set( radius, phi, theta ) {
-
-			this.radius = radius;
-			this.phi = phi;
-			this.theta = theta;
-
-			return this;
-
-		}
-
-		clone() {
-
-			return new this.constructor().copy( this );
-
-		}
-
-		copy( other ) {
-
-			this.radius = other.radius;
-			this.phi = other.phi;
-			this.theta = other.theta;
-
-			return this;
-
-		}
-
-		// restrict phi to be betwee EPS and PI-EPS
-		makeSafe() {
-
-			const EPS = 0.000001;
-			this.phi = Math.max( EPS, Math.min( Math.PI - EPS, this.phi ) );
-
-			return this;
-
-		}
-
-		setFromVector3( v ) {
-
-			return this.setFromCartesianCoords( v.x, v.y, v.z );
-
-		}
-
-		setFromCartesianCoords( x, y, z ) {
-
-			this.radius = Math.sqrt( x * x + y * y + z * z );
-
-			if ( this.radius === 0 ) {
-
-				this.theta = 0;
-				this.phi = 0;
-
-			} else {
-
-				this.theta = Math.atan2( x, z );
-				this.phi = Math.acos( MathUtils.clamp( y / this.radius, - 1, 1 ) );
-
-			}
-
-			return this;
-
-		}
-
-	}
 
 	const _vector$7 = new Vector2();
 
@@ -46281,13 +45783,162 @@
 
 	new Vector3();
 
-	new Vector3();
-	new Matrix4();
-	new Matrix4();
+	const _vector$9 = new Vector3();
+	const _boneMatrix = new Matrix4();
+	const _matrixWorldInv = new Matrix4();
+
+
+	class SkeletonHelper extends LineSegments {
+
+		constructor( object ) {
+
+			const bones = getBoneList( object );
+
+			const geometry = new BufferGeometry();
+
+			const vertices = [];
+			const colors = [];
+
+			const color1 = new Color( 0, 0, 1 );
+			const color2 = new Color( 0, 1, 0 );
+
+			for ( let i = 0; i < bones.length; i ++ ) {
+
+				const bone = bones[ i ];
+
+				if ( bone.parent && bone.parent.isBone ) {
+
+					vertices.push( 0, 0, 0 );
+					vertices.push( 0, 0, 0 );
+					colors.push( color1.r, color1.g, color1.b );
+					colors.push( color2.r, color2.g, color2.b );
+
+				}
+
+			}
+
+			geometry.setAttribute( 'position', new Float32BufferAttribute( vertices, 3 ) );
+			geometry.setAttribute( 'color', new Float32BufferAttribute( colors, 3 ) );
+
+			const material = new LineBasicMaterial( { vertexColors: true, depthTest: false, depthWrite: false, toneMapped: false, transparent: true } );
+
+			super( geometry, material );
+
+			this.type = 'SkeletonHelper';
+			this.isSkeletonHelper = true;
+
+			this.root = object;
+			this.bones = bones;
+
+			this.matrix = object.matrixWorld;
+			this.matrixAutoUpdate = false;
+
+		}
+
+		updateMatrixWorld( force ) {
+
+			const bones = this.bones;
+
+			const geometry = this.geometry;
+			const position = geometry.getAttribute( 'position' );
+
+			_matrixWorldInv.getInverse( this.root.matrixWorld );
+
+			for ( let i = 0, j = 0; i < bones.length; i ++ ) {
+
+				const bone = bones[ i ];
+
+				if ( bone.parent && bone.parent.isBone ) {
+
+					_boneMatrix.multiplyMatrices( _matrixWorldInv, bone.matrixWorld );
+					_vector$9.setFromMatrixPosition( _boneMatrix );
+					position.setXYZ( j, _vector$9.x, _vector$9.y, _vector$9.z );
+
+					_boneMatrix.multiplyMatrices( _matrixWorldInv, bone.parent.matrixWorld );
+					_vector$9.setFromMatrixPosition( _boneMatrix );
+					position.setXYZ( j + 1, _vector$9.x, _vector$9.y, _vector$9.z );
+
+					j += 2;
+
+				}
+
+			}
+
+			geometry.getAttribute( 'position' ).needsUpdate = true;
+
+			super.updateMatrixWorld( force );
+
+		}
+
+	}
+
+
+	function getBoneList( object ) {
+
+		const boneList = [];
+
+		if ( object && object.isBone ) {
+
+			boneList.push( object );
+
+		}
+
+		for ( let i = 0; i < object.children.length; i ++ ) {
+
+			boneList.push.apply( boneList, getBoneList( object.children[ i ] ) );
+
+		}
+
+		return boneList;
+
+	}
 
 	new Vector3();
 	new Color();
 	new Color();
+
+	class GridHelper extends LineSegments {
+
+		constructor( size, divisions, color1, color2 ) {
+
+			size = size || 10;
+			divisions = divisions || 10;
+			color1 = new Color( color1 !== undefined ? color1 : 0x444444 );
+			color2 = new Color( color2 !== undefined ? color2 : 0x888888 );
+
+			const center = divisions / 2;
+			const step = size / divisions;
+			const halfSize = size / 2;
+
+			const vertices = [], colors = [];
+
+			for ( let i = 0, j = 0, k = - halfSize; i <= divisions; i ++, k += step ) {
+
+				vertices.push( - halfSize, 0, k, halfSize, 0, k );
+				vertices.push( k, 0, - halfSize, k, 0, halfSize );
+
+				const color = i === center ? color1 : color2;
+
+				color.toArray( colors, j ); j += 3;
+				color.toArray( colors, j ); j += 3;
+				color.toArray( colors, j ); j += 3;
+				color.toArray( colors, j ); j += 3;
+
+			}
+
+			const geometry = new BufferGeometry();
+			geometry.setAttribute( 'position', new Float32BufferAttribute( vertices, 3 ) );
+			geometry.setAttribute( 'color', new Float32BufferAttribute( colors, 3 ) );
+
+			const material = new LineBasicMaterial( { vertexColors: true, toneMapped: false } );
+
+			super( geometry, material );
+
+			this.type = 'GridHelper';
+
+		}
+
+	}
 
 	new Vector3();
 	new Vector3();
@@ -46482,6 +46133,10 @@
 
 	} );
 
+	Object.create( CatmullRomCurve3.prototype );
+
+	Object.create( CatmullRomCurve3.prototype );
+
 	//
 
 	function Spline( points ) {
@@ -46514,6 +46169,18 @@
 		}
 
 	} );
+
+	GridHelper.prototype.setColors = function () {
+
+		console.error( 'THREE.GridHelper: setColors() has been deprecated, pass them in the constructor instead.' );
+
+	};
+
+	SkeletonHelper.prototype.update = function () {
+
+		console.error( 'THREE.SkeletonHelper: update() no longer needs to be called.' );
+
+	};
 
 	//
 
@@ -47549,28 +47216,6 @@
 
 	//
 
-	Object.defineProperties( Uniform.prototype, {
-
-		dynamic: {
-			set: function () {
-
-				console.warn( 'THREE.Uniform: .dynamic has been removed. Use object.onBeforeRender() instead.' );
-
-			}
-		},
-		onUpdate: {
-			value: function () {
-
-				console.warn( 'THREE.Uniform: .onUpdate() has been removed. Use object.onBeforeRender() instead.' );
-				return this;
-
-			}
-		}
-
-	} );
-
-	//
-
 	Object.defineProperties( Material.prototype, {
 
 		wrapAround: {
@@ -48137,35 +47782,6 @@
 
 	//
 
-	Object.defineProperties( Audio.prototype, {
-
-		load: {
-			value: function ( file ) {
-
-				console.warn( 'THREE.Audio: .load has been deprecated. Use THREE.AudioLoader instead.' );
-				const scope = this;
-				const audioLoader = new AudioLoader();
-				audioLoader.load( file, function ( buffer ) {
-
-					scope.setBuffer( buffer );
-
-				} );
-				return this;
-
-			}
-		},
-		startTime: {
-			set: function () {
-
-				console.warn( 'THREE.Audio: .startTime is now .play( delay ).' );
-
-			}
-		}
-
-	} );
-
-	//
-
 	CubeCamera.prototype.updateCubeMap = function ( renderer, scene ) {
 
 		console.warn( 'THREE.CubeCamera: .updateCubeMap() is now .update().' );
@@ -48227,287 +47843,22 @@
 
 	}
 
-	// This set of controls performs orbiting, dollying (zooming), and panning.
-	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).
-	//
-	//    Orbit - left mouse / touch: one-finger move
-	//    Zoom - middle mouse, or mousewheel / touch: two-finger spread or squish
-	//    Pan - right mouse, or left mouse + ctrl/meta/shiftKey, or arrow keys / touch: two-finger move
+	var PointerLockControls = function ( camera, domElement ) {
 
-	var OrbitControls = function ( object, domElement ) {
+		if ( domElement === undefined ) {
 
-		if ( domElement === undefined ) console.warn( 'THREE.OrbitControls: The second parameter "domElement" is now mandatory.' );
-		if ( domElement === document ) console.error( 'THREE.OrbitControls: "document" should not be used as the target "domElement". Please use "renderer.domElement" instead.' );
+			console.warn( 'THREE.PointerLockControls: The second parameter "domElement" is now mandatory.' );
+			domElement = document.body;
 
-		this.object = object;
+		}
+
 		this.domElement = domElement;
+		this.isLocked = false;
 
-		// Set to false to disable this control
-		this.enabled = true;
-
-		// "target" sets the location of focus, where the object orbits around
-		this.target = new Vector3();
-
-		// How far you can dolly in and out ( PerspectiveCamera only )
-		this.minDistance = 0;
-		this.maxDistance = Infinity;
-
-		// How far you can zoom in and out ( OrthographicCamera only )
-		this.minZoom = 0;
-		this.maxZoom = Infinity;
-
-		// How far you can orbit vertically, upper and lower limits.
-		// Range is 0 to Math.PI radians.
+		// Set to constrain the pitch of the camera
+		// Range is 0 to Math.PI radians
 		this.minPolarAngle = 0; // radians
 		this.maxPolarAngle = Math.PI; // radians
-
-		// How far you can orbit horizontally, upper and lower limits.
-		// If set, the interval [ min, max ] must be a sub-interval of [ - 2 PI, 2 PI ], with ( max - min < 2 PI )
-		this.minAzimuthAngle = - Infinity; // radians
-		this.maxAzimuthAngle = Infinity; // radians
-
-		// Set to true to enable damping (inertia)
-		// If damping is enabled, you must call controls.update() in your animation loop
-		this.enableDamping = false;
-		this.dampingFactor = 0.05;
-
-		// This option actually enables dollying in and out; left as "zoom" for backwards compatibility.
-		// Set to false to disable zooming
-		this.enableZoom = true;
-		this.zoomSpeed = 1.0;
-
-		// Set to false to disable rotating
-		this.enableRotate = true;
-		this.rotateSpeed = 1.0;
-
-		// Set to false to disable panning
-		this.enablePan = true;
-		this.panSpeed = 1.0;
-		this.screenSpacePanning = true; // if false, pan orthogonal to world-space direction camera.up
-		this.keyPanSpeed = 7.0;	// pixels moved per arrow key push
-
-		// Set to true to automatically rotate around the target
-		// If auto-rotate is enabled, you must call controls.update() in your animation loop
-		this.autoRotate = false;
-		this.autoRotateSpeed = 2.0; // 30 seconds per round when fps is 60
-
-		// Set to false to disable use of the keys
-		this.enableKeys = true;
-
-		// The four arrow keys
-		this.keys = { LEFT: 37, UP: 38, RIGHT: 39, BOTTOM: 40 };
-
-		// Mouse buttons
-		this.mouseButtons = { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN };
-
-		// Touch fingers
-		this.touches = { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN };
-
-		// for reset
-		this.target0 = this.target.clone();
-		this.position0 = this.object.position.clone();
-		this.zoom0 = this.object.zoom;
-
-		//
-		// public methods
-		//
-
-		this.getPolarAngle = function () {
-
-			return spherical.phi;
-
-		};
-
-		this.getAzimuthalAngle = function () {
-
-			return spherical.theta;
-
-		};
-
-		this.saveState = function () {
-
-			scope.target0.copy( scope.target );
-			scope.position0.copy( scope.object.position );
-			scope.zoom0 = scope.object.zoom;
-
-		};
-
-		this.reset = function () {
-
-			scope.target.copy( scope.target0 );
-			scope.object.position.copy( scope.position0 );
-			scope.object.zoom = scope.zoom0;
-
-			scope.object.updateProjectionMatrix();
-			scope.dispatchEvent( changeEvent );
-
-			scope.update();
-
-			state = STATE.NONE;
-
-		};
-
-		// this method is exposed, but perhaps it would be better if we can make it private...
-		this.update = function () {
-
-			var offset = new Vector3();
-
-			// so camera.up is the orbit axis
-			var quat = new Quaternion().setFromUnitVectors( object.up, new Vector3( 0, 1, 0 ) );
-			var quatInverse = quat.clone().inverse();
-
-			var lastPosition = new Vector3();
-			var lastQuaternion = new Quaternion();
-
-			var twoPI = 2 * Math.PI;
-
-			return function update() {
-
-				var position = scope.object.position;
-
-				offset.copy( position ).sub( scope.target );
-
-				// rotate offset to "y-axis-is-up" space
-				offset.applyQuaternion( quat );
-
-				// angle from z-axis around y-axis
-				spherical.setFromVector3( offset );
-
-				if ( scope.autoRotate && state === STATE.NONE ) {
-
-					rotateLeft( getAutoRotationAngle() );
-
-				}
-
-				if ( scope.enableDamping ) {
-
-					spherical.theta += sphericalDelta.theta * scope.dampingFactor;
-					spherical.phi += sphericalDelta.phi * scope.dampingFactor;
-
-				} else {
-
-					spherical.theta += sphericalDelta.theta;
-					spherical.phi += sphericalDelta.phi;
-
-				}
-
-				// restrict theta to be between desired limits
-
-				var min = scope.minAzimuthAngle;
-				var max = scope.maxAzimuthAngle;
-
-				if ( isFinite( min ) && isFinite( max ) ) {
-
-					if ( min < - Math.PI ) min += twoPI; else if ( min > Math.PI ) min -= twoPI;
-
-					if ( max < - Math.PI ) max += twoPI; else if ( max > Math.PI ) max -= twoPI;
-
-					if ( min < max ) {
-
-						spherical.theta = Math.max( min, Math.min( max, spherical.theta ) );
-
-					} else {
-
-						spherical.theta = ( spherical.theta > ( min + max ) / 2 ) ?
-							Math.max( min, spherical.theta ) :
-							Math.min( max, spherical.theta );
-
-					}
-
-				}
-
-				// restrict phi to be between desired limits
-				spherical.phi = Math.max( scope.minPolarAngle, Math.min( scope.maxPolarAngle, spherical.phi ) );
-
-				spherical.makeSafe();
-
-
-				spherical.radius *= scale;
-
-				// restrict radius to be between desired limits
-				spherical.radius = Math.max( scope.minDistance, Math.min( scope.maxDistance, spherical.radius ) );
-
-				// move target to panned location
-
-				if ( scope.enableDamping === true ) {
-
-					scope.target.addScaledVector( panOffset, scope.dampingFactor );
-
-				} else {
-
-					scope.target.add( panOffset );
-
-				}
-
-				offset.setFromSpherical( spherical );
-
-				// rotate offset back to "camera-up-vector-is-up" space
-				offset.applyQuaternion( quatInverse );
-
-				position.copy( scope.target ).add( offset );
-
-				scope.object.lookAt( scope.target );
-
-				if ( scope.enableDamping === true ) {
-
-					sphericalDelta.theta *= ( 1 - scope.dampingFactor );
-					sphericalDelta.phi *= ( 1 - scope.dampingFactor );
-
-					panOffset.multiplyScalar( 1 - scope.dampingFactor );
-
-				} else {
-
-					sphericalDelta.set( 0, 0, 0 );
-
-					panOffset.set( 0, 0, 0 );
-
-				}
-
-				scale = 1;
-
-				// update condition is:
-				// min(camera displacement, camera rotation in radians)^2 > EPS
-				// using small-angle approximation cos(x/2) = 1 - x^2 / 8
-
-				if ( zoomChanged ||
-					lastPosition.distanceToSquared( scope.object.position ) > EPS ||
-					8 * ( 1 - lastQuaternion.dot( scope.object.quaternion ) ) > EPS ) {
-
-					scope.dispatchEvent( changeEvent );
-
-					lastPosition.copy( scope.object.position );
-					lastQuaternion.copy( scope.object.quaternion );
-					zoomChanged = false;
-
-					return true;
-
-				}
-
-				return false;
-
-			};
-
-		}();
-
-		this.dispose = function () {
-
-			scope.domElement.removeEventListener( 'contextmenu', onContextMenu, false );
-
-			scope.domElement.removeEventListener( 'pointerdown', onPointerDown, false );
-			scope.domElement.removeEventListener( 'wheel', onMouseWheel, false );
-
-			scope.domElement.removeEventListener( 'touchstart', onTouchStart, false );
-			scope.domElement.removeEventListener( 'touchend', onTouchEnd, false );
-			scope.domElement.removeEventListener( 'touchmove', onTouchMove, false );
-
-			scope.domElement.ownerDocument.removeEventListener( 'pointermove', onPointerMove, false );
-			scope.domElement.ownerDocument.removeEventListener( 'pointerup', onPointerUp, false );
-
-			scope.domElement.removeEventListener( 'keydown', onKeyDown, false );
-
-			//scope.dispatchEvent( { type: 'dispose' } ); // should this be added here?
-
-		};
 
 		//
 		// internals
@@ -48516,950 +47867,418 @@
 		var scope = this;
 
 		var changeEvent = { type: 'change' };
-		var startEvent = { type: 'start' };
-		var endEvent = { type: 'end' };
+		var lockEvent = { type: 'lock' };
+		var unlockEvent = { type: 'unlock' };
 
-		var STATE = {
-			NONE: - 1,
-			ROTATE: 0,
-			DOLLY: 1,
-			PAN: 2,
-			TOUCH_ROTATE: 3,
-			TOUCH_PAN: 4,
-			TOUCH_DOLLY_PAN: 5,
-			TOUCH_DOLLY_ROTATE: 6
-		};
+		var euler = new Euler( 0, 0, 0, 'YXZ' );
 
-		var state = STATE.NONE;
+		var PI_2 = Math.PI / 2;
 
-		var EPS = 0.000001;
-
-		// current position in spherical coordinates
-		var spherical = new Spherical();
-		var sphericalDelta = new Spherical();
-
-		var scale = 1;
-		var panOffset = new Vector3();
-		var zoomChanged = false;
-
-		var rotateStart = new Vector2();
-		var rotateEnd = new Vector2();
-		var rotateDelta = new Vector2();
-
-		var panStart = new Vector2();
-		var panEnd = new Vector2();
-		var panDelta = new Vector2();
-
-		var dollyStart = new Vector2();
-		var dollyEnd = new Vector2();
-		var dollyDelta = new Vector2();
-
-		function getAutoRotationAngle() {
-
-			return 2 * Math.PI / 60 / 60 * scope.autoRotateSpeed;
-
-		}
-
-		function getZoomScale() {
-
-			return Math.pow( 0.95, scope.zoomSpeed );
-
-		}
-
-		function rotateLeft( angle ) {
-
-			sphericalDelta.theta -= angle;
-
-		}
-
-		function rotateUp( angle ) {
-
-			sphericalDelta.phi -= angle;
-
-		}
-
-		var panLeft = function () {
-
-			var v = new Vector3();
-
-			return function panLeft( distance, objectMatrix ) {
-
-				v.setFromMatrixColumn( objectMatrix, 0 ); // get X column of objectMatrix
-				v.multiplyScalar( - distance );
-
-				panOffset.add( v );
-
-			};
-
-		}();
-
-		var panUp = function () {
-
-			var v = new Vector3();
-
-			return function panUp( distance, objectMatrix ) {
-
-				if ( scope.screenSpacePanning === true ) {
-
-					v.setFromMatrixColumn( objectMatrix, 1 );
-
-				} else {
-
-					v.setFromMatrixColumn( objectMatrix, 0 );
-					v.crossVectors( scope.object.up, v );
-
-				}
-
-				v.multiplyScalar( distance );
-
-				panOffset.add( v );
-
-			};
-
-		}();
-
-		// deltaX and deltaY are in pixels; right and down are positive
-		var pan = function () {
-
-			var offset = new Vector3();
-
-			return function pan( deltaX, deltaY ) {
-
-				var element = scope.domElement;
-
-				if ( scope.object.isPerspectiveCamera ) {
-
-					// perspective
-					var position = scope.object.position;
-					offset.copy( position ).sub( scope.target );
-					var targetDistance = offset.length();
-
-					// half of the fov is center to top of screen
-					targetDistance *= Math.tan( ( scope.object.fov / 2 ) * Math.PI / 180.0 );
-
-					// we use only clientHeight here so aspect ratio does not distort speed
-					panLeft( 2 * deltaX * targetDistance / element.clientHeight, scope.object.matrix );
-					panUp( 2 * deltaY * targetDistance / element.clientHeight, scope.object.matrix );
-
-				} else if ( scope.object.isOrthographicCamera ) {
-
-					// orthographic
-					panLeft( deltaX * ( scope.object.right - scope.object.left ) / scope.object.zoom / element.clientWidth, scope.object.matrix );
-					panUp( deltaY * ( scope.object.top - scope.object.bottom ) / scope.object.zoom / element.clientHeight, scope.object.matrix );
-
-				} else {
-
-					// camera neither orthographic nor perspective
-					console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - pan disabled.' );
-					scope.enablePan = false;
-
-				}
-
-			};
-
-		}();
-
-		function dollyOut( dollyScale ) {
-
-			if ( scope.object.isPerspectiveCamera ) {
-
-				scale /= dollyScale;
-
-			} else if ( scope.object.isOrthographicCamera ) {
-
-				scope.object.zoom = Math.max( scope.minZoom, Math.min( scope.maxZoom, scope.object.zoom * dollyScale ) );
-				scope.object.updateProjectionMatrix();
-				zoomChanged = true;
-
-			} else {
-
-				console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled.' );
-				scope.enableZoom = false;
-
-			}
-
-		}
-
-		function dollyIn( dollyScale ) {
-
-			if ( scope.object.isPerspectiveCamera ) {
-
-				scale *= dollyScale;
-
-			} else if ( scope.object.isOrthographicCamera ) {
-
-				scope.object.zoom = Math.max( scope.minZoom, Math.min( scope.maxZoom, scope.object.zoom / dollyScale ) );
-				scope.object.updateProjectionMatrix();
-				zoomChanged = true;
-
-			} else {
-
-				console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled.' );
-				scope.enableZoom = false;
-
-			}
-
-		}
-
-		//
-		// event callbacks - update the object state
-		//
-
-		function handleMouseDownRotate( event ) {
-
-			rotateStart.set( event.clientX, event.clientY );
-
-		}
-
-		function handleMouseDownDolly( event ) {
-
-			dollyStart.set( event.clientX, event.clientY );
-
-		}
-
-		function handleMouseDownPan( event ) {
-
-			panStart.set( event.clientX, event.clientY );
-
-		}
-
-		function handleMouseMoveRotate( event ) {
-
-			rotateEnd.set( event.clientX, event.clientY );
-
-			rotateDelta.subVectors( rotateEnd, rotateStart ).multiplyScalar( scope.rotateSpeed );
-
-			var element = scope.domElement;
-
-			rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientHeight ); // yes, height
-
-			rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight );
-
-			rotateStart.copy( rotateEnd );
-
-			scope.update();
-
-		}
-
-		function handleMouseMoveDolly( event ) {
-
-			dollyEnd.set( event.clientX, event.clientY );
-
-			dollyDelta.subVectors( dollyEnd, dollyStart );
-
-			if ( dollyDelta.y > 0 ) {
-
-				dollyOut( getZoomScale() );
-
-			} else if ( dollyDelta.y < 0 ) {
-
-				dollyIn( getZoomScale() );
-
-			}
-
-			dollyStart.copy( dollyEnd );
-
-			scope.update();
-
-		}
-
-		function handleMouseMovePan( event ) {
-
-			panEnd.set( event.clientX, event.clientY );
-
-			panDelta.subVectors( panEnd, panStart ).multiplyScalar( scope.panSpeed );
-
-			pan( panDelta.x, panDelta.y );
-
-			panStart.copy( panEnd );
-
-			scope.update();
-
-		}
-
-		function handleMouseWheel( event ) {
-
-			if ( event.deltaY < 0 ) {
-
-				dollyIn( getZoomScale() );
-
-			} else if ( event.deltaY > 0 ) {
-
-				dollyOut( getZoomScale() );
-
-			}
-
-			scope.update();
-
-		}
-
-		function handleKeyDown( event ) {
-
-			var needsUpdate = false;
-
-			switch ( event.keyCode ) {
-
-				case scope.keys.UP:
-					pan( 0, scope.keyPanSpeed );
-					needsUpdate = true;
-					break;
-
-				case scope.keys.BOTTOM:
-					pan( 0, - scope.keyPanSpeed );
-					needsUpdate = true;
-					break;
-
-				case scope.keys.LEFT:
-					pan( scope.keyPanSpeed, 0 );
-					needsUpdate = true;
-					break;
-
-				case scope.keys.RIGHT:
-					pan( - scope.keyPanSpeed, 0 );
-					needsUpdate = true;
-					break;
-
-			}
-
-			if ( needsUpdate ) {
-
-				// prevent the browser from scrolling on cursor keys
-				event.preventDefault();
-
-				scope.update();
-
-			}
-
-
-		}
-
-		function handleTouchStartRotate( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				rotateStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				rotateStart.set( x, y );
-
-			}
-
-		}
-
-		function handleTouchStartPan( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				panStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				panStart.set( x, y );
-
-			}
-
-		}
-
-		function handleTouchStartDolly( event ) {
-
-			var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
-			var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
-
-			var distance = Math.sqrt( dx * dx + dy * dy );
-
-			dollyStart.set( 0, distance );
-
-		}
-
-		function handleTouchStartDollyPan( event ) {
-
-			if ( scope.enableZoom ) handleTouchStartDolly( event );
-
-			if ( scope.enablePan ) handleTouchStartPan( event );
-
-		}
-
-		function handleTouchStartDollyRotate( event ) {
-
-			if ( scope.enableZoom ) handleTouchStartDolly( event );
-
-			if ( scope.enableRotate ) handleTouchStartRotate( event );
-
-		}
-
-		function handleTouchMoveRotate( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				rotateEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				rotateEnd.set( x, y );
-
-			}
-
-			rotateDelta.subVectors( rotateEnd, rotateStart ).multiplyScalar( scope.rotateSpeed );
-
-			var element = scope.domElement;
-
-			rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientHeight ); // yes, height
-
-			rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight );
-
-			rotateStart.copy( rotateEnd );
-
-		}
-
-		function handleTouchMovePan( event ) {
-
-			if ( event.touches.length == 1 ) {
-
-				panEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
-
-			} else {
-
-				var x = 0.5 * ( event.touches[ 0 ].pageX + event.touches[ 1 ].pageX );
-				var y = 0.5 * ( event.touches[ 0 ].pageY + event.touches[ 1 ].pageY );
-
-				panEnd.set( x, y );
-
-			}
-
-			panDelta.subVectors( panEnd, panStart ).multiplyScalar( scope.panSpeed );
-
-			pan( panDelta.x, panDelta.y );
-
-			panStart.copy( panEnd );
-
-		}
-
-		function handleTouchMoveDolly( event ) {
-
-			var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
-			var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
-
-			var distance = Math.sqrt( dx * dx + dy * dy );
-
-			dollyEnd.set( 0, distance );
-
-			dollyDelta.set( 0, Math.pow( dollyEnd.y / dollyStart.y, scope.zoomSpeed ) );
-
-			dollyOut( dollyDelta.y );
-
-			dollyStart.copy( dollyEnd );
-
-		}
-
-		function handleTouchMoveDollyPan( event ) {
-
-			if ( scope.enableZoom ) handleTouchMoveDolly( event );
-
-			if ( scope.enablePan ) handleTouchMovePan( event );
-
-		}
-
-		function handleTouchMoveDollyRotate( event ) {
-
-			if ( scope.enableZoom ) handleTouchMoveDolly( event );
-
-			if ( scope.enableRotate ) handleTouchMoveRotate( event );
-
-		}
-
-		//
-		// event handlers - FSM: listen for events and reset state
-		//
-
-		function onPointerDown( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			switch ( event.pointerType ) {
-
-				case 'mouse':
-					onMouseDown( event );
-					break;
-
-				// TODO touch
-
-			}
-
-		}
-
-		function onPointerMove( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			switch ( event.pointerType ) {
-
-				case 'mouse':
-					onMouseMove( event );
-					break;
-
-				// TODO touch
-
-			}
-
-		}
-
-		function onPointerUp( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			switch ( event.pointerType ) {
-
-				case 'mouse':
-					onMouseUp();
-					break;
-
-				// TODO touch
-
-			}
-
-		}
-
-		function onMouseDown( event ) {
-
-			// Prevent the browser from scrolling.
-			event.preventDefault();
-
-			// Manually set the focus since calling preventDefault above
-			// prevents the browser from setting it automatically.
-
-			scope.domElement.focus ? scope.domElement.focus() : window.focus();
-
-			var mouseAction;
-
-			switch ( event.button ) {
-
-				case 0:
-
-					mouseAction = scope.mouseButtons.LEFT;
-					break;
-
-				case 1:
-
-					mouseAction = scope.mouseButtons.MIDDLE;
-					break;
-
-				case 2:
-
-					mouseAction = scope.mouseButtons.RIGHT;
-					break;
-
-				default:
-
-					mouseAction = - 1;
-
-			}
-
-			switch ( mouseAction ) {
-
-				case MOUSE.DOLLY:
-
-					if ( scope.enableZoom === false ) return;
-
-					handleMouseDownDolly( event );
-
-					state = STATE.DOLLY;
-
-					break;
-
-				case MOUSE.ROTATE:
-
-					if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
-
-						if ( scope.enablePan === false ) return;
-
-						handleMouseDownPan( event );
-
-						state = STATE.PAN;
-
-					} else {
-
-						if ( scope.enableRotate === false ) return;
-
-						handleMouseDownRotate( event );
-
-						state = STATE.ROTATE;
-
-					}
-
-					break;
-
-				case MOUSE.PAN:
-
-					if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
-
-						if ( scope.enableRotate === false ) return;
-
-						handleMouseDownRotate( event );
-
-						state = STATE.ROTATE;
-
-					} else {
-
-						if ( scope.enablePan === false ) return;
-
-						handleMouseDownPan( event );
-
-						state = STATE.PAN;
-
-					}
-
-					break;
-
-				default:
-
-					state = STATE.NONE;
-
-			}
-
-			if ( state !== STATE.NONE ) {
-
-				scope.domElement.ownerDocument.addEventListener( 'pointermove', onPointerMove, false );
-				scope.domElement.ownerDocument.addEventListener( 'pointerup', onPointerUp, false );
-
-				scope.dispatchEvent( startEvent );
-
-			}
-
-		}
+		var vec = new Vector3();
 
 		function onMouseMove( event ) {
 
-			if ( scope.enabled === false ) return;
+			if ( scope.isLocked === false ) return;
 
-			event.preventDefault();
+			var movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+			var movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
 
-			switch ( state ) {
+			euler.setFromQuaternion( camera.quaternion );
 
-				case STATE.ROTATE:
+			euler.y -= movementX * 0.002;
+			euler.x -= movementY * 0.002;
 
-					if ( scope.enableRotate === false ) return;
+			euler.x = Math.max( PI_2 - scope.maxPolarAngle, Math.min( PI_2 - scope.minPolarAngle, euler.x ) );
 
-					handleMouseMoveRotate( event );
+			camera.quaternion.setFromEuler( euler );
 
-					break;
+			scope.dispatchEvent( changeEvent );
 
-				case STATE.DOLLY:
+		}
 
-					if ( scope.enableZoom === false ) return;
+		function onPointerlockChange() {
 
-					handleMouseMoveDolly( event );
+			if ( scope.domElement.ownerDocument.pointerLockElement === scope.domElement ) {
 
-					break;
+				scope.dispatchEvent( lockEvent );
 
-				case STATE.PAN:
+				scope.isLocked = true;
 
-					if ( scope.enablePan === false ) return;
+			} else {
 
-					handleMouseMovePan( event );
+				scope.dispatchEvent( unlockEvent );
 
-					break;
+				scope.isLocked = false;
 
 			}
 
 		}
 
-		function onMouseUp( event ) {
+		function onPointerlockError() {
 
-			if ( scope.enabled === false ) return;
-
-			scope.domElement.ownerDocument.removeEventListener( 'pointermove', onPointerMove, false );
-			scope.domElement.ownerDocument.removeEventListener( 'pointerup', onPointerUp, false );
-
-			scope.dispatchEvent( endEvent );
-
-			state = STATE.NONE;
+			console.error( 'THREE.PointerLockControls: Unable to use Pointer Lock API' );
 
 		}
 
-		function onMouseWheel( event ) {
+		this.connect = function () {
 
-			if ( scope.enabled === false || scope.enableZoom === false || ( state !== STATE.NONE && state !== STATE.ROTATE ) ) return;
+			scope.domElement.ownerDocument.addEventListener( 'mousemove', onMouseMove, false );
+			scope.domElement.ownerDocument.addEventListener( 'pointerlockchange', onPointerlockChange, false );
+			scope.domElement.ownerDocument.addEventListener( 'pointerlockerror', onPointerlockError, false );
 
-			event.preventDefault();
-			event.stopPropagation();
+		};
 
-			scope.dispatchEvent( startEvent );
+		this.disconnect = function () {
 
-			handleMouseWheel( event );
+			scope.domElement.ownerDocument.removeEventListener( 'mousemove', onMouseMove, false );
+			scope.domElement.ownerDocument.removeEventListener( 'pointerlockchange', onPointerlockChange, false );
+			scope.domElement.ownerDocument.removeEventListener( 'pointerlockerror', onPointerlockError, false );
 
-			scope.dispatchEvent( endEvent );
+		};
 
-		}
+		this.dispose = function () {
 
-		function onKeyDown( event ) {
+			this.disconnect();
 
-			if ( scope.enabled === false || scope.enableKeys === false || scope.enablePan === false ) return;
+		};
 
-			handleKeyDown( event );
+		this.getObject = function () { // retaining this method for backward compatibility
 
-		}
+			return camera;
 
-		function onTouchStart( event ) {
+		};
 
-			if ( scope.enabled === false ) return;
+		this.getDirection = function () {
 
-			event.preventDefault(); // prevent scrolling
+			var direction = new Vector3( 0, 0, - 1 );
 
-			switch ( event.touches.length ) {
+			return function ( v ) {
 
-				case 1:
+				return v.copy( direction ).applyQuaternion( camera.quaternion );
 
-					switch ( scope.touches.ONE ) {
+			};
 
-						case TOUCH.ROTATE:
+		}();
 
-							if ( scope.enableRotate === false ) return;
+		this.moveForward = function ( distance ) {
 
-							handleTouchStartRotate( event );
+			// move forward parallel to the xz-plane
+			// assumes camera.up is y-up
 
-							state = STATE.TOUCH_ROTATE;
+			vec.setFromMatrixColumn( camera.matrix, 0 );
 
-							break;
+			vec.crossVectors( camera.up, vec );
 
-						case TOUCH.PAN:
+			camera.position.addScaledVector( vec, distance );
 
-							if ( scope.enablePan === false ) return;
+		};
 
-							handleTouchStartPan( event );
+		this.moveRight = function ( distance ) {
 
-							state = STATE.TOUCH_PAN;
+			vec.setFromMatrixColumn( camera.matrix, 0 );
 
-							break;
+			camera.position.addScaledVector( vec, distance );
 
-						default:
+		};
 
-							state = STATE.NONE;
+		this.lock = function () {
 
-					}
+			this.domElement.requestPointerLock();
 
-					break;
+		};
 
-				case 2:
+		this.unlock = function () {
 
-					switch ( scope.touches.TWO ) {
+			scope.domElement.ownerDocument.exitPointerLock();
 
-						case TOUCH.DOLLY_PAN:
+		};
 
-							if ( scope.enableZoom === false && scope.enablePan === false ) return;
-
-							handleTouchStartDollyPan( event );
-
-							state = STATE.TOUCH_DOLLY_PAN;
-
-							break;
-
-						case TOUCH.DOLLY_ROTATE:
-
-							if ( scope.enableZoom === false && scope.enableRotate === false ) return;
-
-							handleTouchStartDollyRotate( event );
-
-							state = STATE.TOUCH_DOLLY_ROTATE;
-
-							break;
-
-						default:
-
-							state = STATE.NONE;
-
-					}
-
-					break;
-
-				default:
-
-					state = STATE.NONE;
-
-			}
-
-			if ( state !== STATE.NONE ) {
-
-				scope.dispatchEvent( startEvent );
-
-			}
-
-		}
-
-		function onTouchMove( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			event.preventDefault(); // prevent scrolling
-			event.stopPropagation();
-
-			switch ( state ) {
-
-				case STATE.TOUCH_ROTATE:
-
-					if ( scope.enableRotate === false ) return;
-
-					handleTouchMoveRotate( event );
-
-					scope.update();
-
-					break;
-
-				case STATE.TOUCH_PAN:
-
-					if ( scope.enablePan === false ) return;
-
-					handleTouchMovePan( event );
-
-					scope.update();
-
-					break;
-
-				case STATE.TOUCH_DOLLY_PAN:
-
-					if ( scope.enableZoom === false && scope.enablePan === false ) return;
-
-					handleTouchMoveDollyPan( event );
-
-					scope.update();
-
-					break;
-
-				case STATE.TOUCH_DOLLY_ROTATE:
-
-					if ( scope.enableZoom === false && scope.enableRotate === false ) return;
-
-					handleTouchMoveDollyRotate( event );
-
-					scope.update();
-
-					break;
-
-				default:
-
-					state = STATE.NONE;
-
-			}
-
-		}
-
-		function onTouchEnd( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			scope.dispatchEvent( endEvent );
-
-			state = STATE.NONE;
-
-		}
-
-		function onContextMenu( event ) {
-
-			if ( scope.enabled === false ) return;
-
-			event.preventDefault();
-
-		}
-
-		//
-
-		scope.domElement.addEventListener( 'contextmenu', onContextMenu, false );
-
-		scope.domElement.addEventListener( 'pointerdown', onPointerDown, false );
-		scope.domElement.addEventListener( 'wheel', onMouseWheel, false );
-
-		scope.domElement.addEventListener( 'touchstart', onTouchStart, false );
-		scope.domElement.addEventListener( 'touchend', onTouchEnd, false );
-		scope.domElement.addEventListener( 'touchmove', onTouchMove, false );
-
-		scope.domElement.addEventListener( 'keydown', onKeyDown, false );
-
-		// make sure element can receive keys.
-
-		if ( scope.domElement.tabIndex === - 1 ) {
-
-			scope.domElement.tabIndex = 0;
-
-		}
-
-		// force an update at start
-
-		this.update();
+		this.connect();
 
 	};
 
-	OrbitControls.prototype = Object.create( EventDispatcher.prototype );
-	OrbitControls.prototype.constructor = OrbitControls;
+	PointerLockControls.prototype = Object.create( EventDispatcher.prototype );
+	PointerLockControls.prototype.constructor = PointerLockControls;
 
+	// http://mrl.nyu.edu/~perlin/noise/
 
-	// This set of controls performs orbiting, dollying (zooming), and panning.
-	// Unlike TrackballControls, it maintains the "up" direction object.up (+Y by default).
-	// This is very similar to OrbitControls, another set of touch behavior
-	//
-	//    Orbit - right mouse, or left mouse + ctrl/meta/shiftKey / touch: two-finger rotate
-	//    Zoom - middle mouse, or mousewheel / touch: two-finger spread or squish
-	//    Pan - left mouse, or arrow keys / touch: one-finger move
+	var ImprovedNoise = function () {
 
-	var MapControls = function ( object, domElement ) {
+		var p = [ 151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69, 142, 8, 99, 37, 240, 21, 10,
+			 23, 190, 6, 148, 247, 120, 234, 75, 0, 26, 197, 62, 94, 252, 219, 203, 117, 35, 11, 32, 57, 177, 33, 88, 237, 149, 56, 87,
+			 174, 20, 125, 136, 171, 168, 68, 175, 74, 165, 71, 134, 139, 48, 27, 166, 77, 146, 158, 231, 83, 111, 229, 122, 60, 211,
+			 133, 230, 220, 105, 92, 41, 55, 46, 245, 40, 244, 102, 143, 54, 65, 25, 63, 161, 1, 216, 80, 73, 209, 76, 132, 187, 208,
+			 89, 18, 169, 200, 196, 135, 130, 116, 188, 159, 86, 164, 100, 109, 198, 173, 186, 3, 64, 52, 217, 226, 250, 124, 123, 5,
+			 202, 38, 147, 118, 126, 255, 82, 85, 212, 207, 206, 59, 227, 47, 16, 58, 17, 182, 189, 28, 42, 223, 183, 170, 213, 119,
+			 248, 152, 2, 44, 154, 163, 70, 221, 153, 101, 155, 167, 43, 172, 9, 129, 22, 39, 253, 19, 98, 108, 110, 79, 113, 224, 232,
+			 178, 185, 112, 104, 218, 246, 97, 228, 251, 34, 242, 193, 238, 210, 144, 12, 191, 179, 162, 241, 81, 51, 145, 235, 249,
+			 14, 239, 107, 49, 192, 214, 31, 181, 199, 106, 157, 184, 84, 204, 176, 115, 121, 50, 45, 127, 4, 150, 254, 138, 236, 205,
+			 93, 222, 114, 67, 29, 24, 72, 243, 141, 128, 195, 78, 66, 215, 61, 156, 180 ];
 
-		OrbitControls.call( this, object, domElement );
+		for ( var i = 0; i < 256; i ++ ) {
 
-		this.screenSpacePanning = false; // pan orthogonal to world-space direction camera.up
+			p[ 256 + i ] = p[ i ];
 
-		this.mouseButtons.LEFT = MOUSE.PAN;
-		this.mouseButtons.RIGHT = MOUSE.ROTATE;
+		}
 
-		this.touches.ONE = TOUCH.PAN;
-		this.touches.TWO = TOUCH.DOLLY_ROTATE;
+		function fade( t ) {
+
+			return t * t * t * ( t * ( t * 6 - 15 ) + 10 );
+
+		}
+
+		function lerp( t, a, b ) {
+
+			return a + t * ( b - a );
+
+		}
+
+		function grad( hash, x, y, z ) {
+
+			var h = hash & 15;
+			var u = h < 8 ? x : y, v = h < 4 ? y : h == 12 || h == 14 ? x : z;
+			return ( ( h & 1 ) == 0 ? u : - u ) + ( ( h & 2 ) == 0 ? v : - v );
+
+		}
+
+		return {
+
+			noise: function ( x, y, z ) {
+
+				var floorX = Math.floor( x ), floorY = Math.floor( y ), floorZ = Math.floor( z );
+
+				var X = floorX & 255, Y = floorY & 255, Z = floorZ & 255;
+
+				x -= floorX;
+				y -= floorY;
+				z -= floorZ;
+
+				var xMinus1 = x - 1, yMinus1 = y - 1, zMinus1 = z - 1;
+
+				var u = fade( x ), v = fade( y ), w = fade( z );
+
+				var A = p[ X ] + Y, AA = p[ A ] + Z, AB = p[ A + 1 ] + Z, B = p[ X + 1 ] + Y, BA = p[ B ] + Z, BB = p[ B + 1 ] + Z;
+
+				return lerp( w, lerp( v, lerp( u, grad( p[ AA ], x, y, z ),
+					grad( p[ BA ], xMinus1, y, z ) ),
+				lerp( u, grad( p[ AB ], x, yMinus1, z ),
+					grad( p[ BB ], xMinus1, yMinus1, z ) ) ),
+				lerp( v, lerp( u, grad( p[ AA + 1 ], x, y, zMinus1 ),
+					grad( p[ BA + 1 ], xMinus1, y, z - 1 ) ),
+				lerp( u, grad( p[ AB + 1 ], x, yMinus1, zMinus1 ),
+					grad( p[ BB + 1 ], xMinus1, yMinus1, zMinus1 ) ) ) );
+
+			}
+		};
 
 	};
 
-	MapControls.prototype = Object.create( EventDispatcher.prototype );
-	MapControls.prototype.constructor = MapControls;
+	var vert$2 = "varying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\nvarying float vWorldY; // Pass world Y position to fragment shader\r\n\r\nuniform float iTime;\r\n\r\nvoid main() {\r\n  vUv = uv;\r\n  cloudUV = uv;\r\n  vColor = color;\r\n  vec3 cpos = position;\r\n\r\n  float waveSize = 10.0f;\r\n  float tipDistance = 0.3f;\r\n  float centerDistance = 0.1f;\r\n\r\n  if (color.x > 0.6f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * tipDistance;\r\n  }else if (color.x > 0.0f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * centerDistance;\r\n  }\r\n\r\n  float diff = position.x - cpos.x;\r\n  cloudUV.x += iTime / 20000.;\r\n  cloudUV.y += iTime / 10000.;\r\n\r\n  // Calculate world position for height-based effects\r\n  vec4 worldPos = modelMatrix * vec4(cpos, 1.0);\r\n  vWorldY = worldPos.y;\r\n\r\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(cpos, 1.0);\r\n  gl_Position = mvPosition;\r\n}\r\n";
 
-	var vert = "varying vec2 vUv;\r\nvarying vec2 cloudUV;\r\n\r\nvarying vec3 vColor;\r\nuniform float iTime;\r\n\r\nvoid main() {\r\n  vUv = uv;\r\n  cloudUV = uv;\r\n  vColor = color;\r\n  vec3 cpos = position;\r\n\r\n  float waveSize = 10.0f;\r\n  float tipDistance = 0.3f;\r\n  float centerDistance = 0.1f;\r\n\r\n  if (color.x > 0.6f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * tipDistance;\r\n  }else if (color.x > 0.0f) {\r\n    cpos.x += sin((iTime / 500.) + (uv.x * waveSize)) * centerDistance;\r\n  }\r\n\r\n  float diff = position.x - cpos.x;\r\n  cloudUV.x += iTime / 20000.;\r\n  cloudUV.y += iTime / 10000.;\r\n\r\n  vec4 worldPosition = vec4(cpos, 1.);\r\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(cpos, 1.0);\r\n  gl_Position = mvPosition;\r\n}\r\n";
+	var frag$2 = "uniform sampler2D texture1;\r\nuniform sampler2D textures[4];\r\nuniform float grassMinHeight; // Height below which grass disappears\r\n\r\nvarying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\nvarying float vWorldY;\r\n\r\nvoid main() {\r\n  // Discard grass below minimum height (in canyons)\r\n  // Use hard discard, no transparency issues\r\n  if (vWorldY < grassMinHeight) {\r\n    discard;\r\n  }\r\n  \r\n  float contrast = 1.5;\r\n  float brightness = 0.1;\r\n  vec3 color = texture2D(textures[0], vUv).rgb * contrast;\r\n  color = color + vec3(brightness, brightness, brightness);\r\n  color = mix(color, texture2D(textures[1], cloudUV).rgb, 0.4);\r\n  \r\n  gl_FragColor.rgb = color;\r\n  gl_FragColor.a = 1.0;\r\n}\r\n";
 
-	var frag = "uniform sampler2D texture1;\r\nuniform sampler2D textures[4];\r\n\r\nvarying vec2 vUv;\r\nvarying vec2 cloudUV;\r\nvarying vec3 vColor;\r\n\r\nvoid main() {\r\n  float contrast = 1.5;\r\n  float brightness = 0.1;\r\n  vec3 color = texture2D(textures[0], vUv).rgb * contrast;\r\n  color = color + vec3(brightness, brightness, brightness);\r\n  color = mix(color, texture2D(textures[1], cloudUV).rgb, 0.4);\r\n  gl_FragColor.rgb = color;\r\n  gl_FragColor.a = 1.;\r\n}\r\n";
+	var grassShader = { frag: frag$2, vert: vert$2 };
 
-	var grassShader = { frag, vert };
+	var vert$1 = "varying vec2 vUv;\nvarying vec2 cloudUV;\nvarying vec3 vNormal;\nvarying vec3 vWorldPosition;\n\nuniform float iTime;\n\nvoid main() {\n  vUv = uv;\n  vNormal = normalize(normalMatrix * normal);\n  \n  // Get world position for cloud shadow calculation\n  vec4 worldPos = modelMatrix * vec4(position, 1.0);\n  vWorldPosition = worldPos.xyz;\n  \n  // Cloud shadow UV based on world position (syncs with grass)\n  // Scale matches the grass UV range (PLANE_SIZE = 60, so -30 to 30)\n  cloudUV = worldPos.xz / 60.0 + 0.5;\n  cloudUV.x += iTime / 20000.0;\n  cloudUV.y += iTime / 10000.0;\n\n  vec4 mvPosition = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n  gl_Position = mvPosition;\n}\n";
+
+	var frag$1 = "uniform sampler2D cloudTexture;\nuniform vec3 groundColor;\nuniform float iTime;\n\nvarying vec2 vUv;\nvarying vec2 cloudUV;\nvarying vec3 vNormal;\n\nvoid main() {\n  // Base mud color\n  vec3 color = groundColor;\n  \n  // Simple diffuse lighting\n  vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));\n  float diffuse = max(dot(vNormal, lightDir), 0.0);\n  color *= 0.6 + diffuse * 0.5;\n  \n  // Mix in cloud shadows (same as grass shader)\n  vec3 cloudShadow = texture2D(cloudTexture, cloudUV).rgb;\n  color = mix(color, color * cloudShadow, 0.4);\n  \n  gl_FragColor.rgb = color;\n  gl_FragColor.a = 1.0;\n}\n";
+
+	var groundShader = { frag: frag$1, vert: vert$1 };
+
+	var vert = "varying vec2 vUv;\n\nvoid main() {\n  vUv = uv;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}\n";
+
+	var frag = "uniform sampler2D cloudTexture;\nuniform float opacity;\n\nvarying vec2 vUv;\n\nvoid main() {\n  vec4 texColor = texture2D(cloudTexture, vUv);\n  \n  // Convert to grayscale to determine cloud density\n  float gray = (texColor.r + texColor.g + texColor.b) / 3.0;\n  \n  // Invert and use as alpha - darker areas = more cloud = more opaque\n  // Light/white areas = sky = transparent\n  float cloudAlpha = 1.0 - gray;\n  \n  // Boost the contrast so clouds are more defined\n  cloudAlpha = smoothstep(0.1, 0.6, cloudAlpha);\n  \n  // Apply base opacity\n  cloudAlpha *= opacity;\n  \n  // Cloud color - soft white with slight blue tint\n  vec3 cloudColor = vec3(1.0, 1.0, 1.0);\n  \n  gl_FragColor = vec4(cloudColor, cloudAlpha);\n}\n";
+
+	var cloudShader = { frag, vert };
+
+	// Shared Perlin noise instance for terrain
+	const terrainPerlin = new ImprovedNoise();
+	const TERRAIN_NOISE_SCALE = 0.05; // Slightly larger features
+	const TERRAIN_HEIGHT_SCALE = 8.0; // MUCH more dramatic hills!
+	const TERRAIN_PLATEAU_HEIGHT = 2.0; // Higher base dome
+	const GRASS_HEIGHT_THRESHOLD = 3.5; // No grass above this height (bare peaks!)
+
+	// Persistence Keys
+	const STORAGE_KEY_TERRAIN = 'terrainator_terrain_v1';
+	const STORAGE_KEY_CAMERA = 'terrainator_camera_v1';
+
+	function loadTerrainState() {
+	  try {
+	    const data = localStorage.getItem(STORAGE_KEY_TERRAIN);
+	    if (data) return JSON.parse(data);
+	  } catch (e) {
+	    console.error('Failed to load terrain state', e);
+	  }
+	  return null;
+	}
+
+	function loadCameraState() {
+	  try {
+	    const data = localStorage.getItem(STORAGE_KEY_CAMERA);
+	    if (data) return JSON.parse(data);
+	  } catch (e) {
+	    console.error('Failed to load camera state', e);
+	  }
+	  return null;
+	}
+
+	const savedTerrain = loadTerrainState();
+	const savedCamera = loadCameraState();
+
+	// Random terrain seed - changes every refresh!
+	const TERRAIN_SEED = savedTerrain ? savedTerrain.seed : Math.random() * 1000;
+
+
+
+	// Get terrain height at any x,z position
+	function getTerrainHeight(x, z, radius) {
+	  const distFromCenter = Math.sqrt(x * x + z * z) / radius;
+	  
+	  // Generate noise-based height - main rolling hills (with random seed offset)
+	  let height = terrainPerlin.noise(x * TERRAIN_NOISE_SCALE + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE, 0.5) * TERRAIN_HEIGHT_SCALE;
+	  
+	  // Add a second layer of medium bumps
+	  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 2.5 + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE * 2.5, 1.0) * (TERRAIN_HEIGHT_SCALE * 0.5);
+	  
+	  // Add a third layer of small detail bumps
+	  height += terrainPerlin.noise(x * TERRAIN_NOISE_SCALE * 6 + TERRAIN_SEED, z * TERRAIN_NOISE_SCALE * 6, 2.0) * (TERRAIN_HEIGHT_SCALE * 0.15);
+	  
+	  // Smooth falloff at edges
+	  const edgeFalloff = 1 - Math.pow(Math.min(distFromCenter, 1), 2);
+	  height *= edgeFalloff;
+	  
+	  // Add dome/plateau base shape
+	  const plateauHeight = (1 - distFromCenter * distFromCenter) * TERRAIN_PLATEAU_HEIGHT;
+	  
+	  return Math.max(0, height + plateauHeight);
+	}
 
 	const scene = new Scene();
 	const camera = new PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 	// Parameters
-	const PLANE_SIZE = 30;
-	const BLADE_COUNT = 100000;
-	const BLADE_WIDTH = 0.1;
-	const BLADE_HEIGHT = 0.8;
-	const BLADE_HEIGHT_VARIATION = 0.6;
+	const PLANE_SIZE = 60;
+	const BLADE_COUNT = 200000;
+	const BLADE_WIDTH = 0.25;
+	const BLADE_HEIGHT = 0.2;
+	const BLADE_HEIGHT_VARIATION = 0.9;
 
 	const renderer = new WebGLRenderer({ antialias: true, alpha: true });
 	renderer.setSize(window.innerWidth, window.innerHeight);
 	document.body.appendChild(renderer.domElement);
 
 	// Controls
-	const controls = new OrbitControls(camera, renderer.domElement);
-	controls.enablePan = false;
-	controls.enableZoom = false;
-	controls.minPolarAngle = 1.1;
-	controls.maxPolarAngle = 1.45;
-	controls.enableDamping = true;
-	controls.dampingFactor = 0.1;
-	controls.target.set(0, 0, 0);
+	const controls = new PointerLockControls(camera, document.body);
 
-	// Camera
-	camera.position.set(-7, 3, 7);
-	camera.lookAt(controls.target);
-	camera.setFocalLength(15);
+	const instructions = document.createElement('div');
+	instructions.style.position = 'absolute';
+	instructions.style.top = '50%';
+	instructions.style.left = '50%';
+	instructions.style.transform = 'translate(-50%, -50%)';
+	instructions.style.color = 'white';
+	instructions.style.fontFamily = 'sans-serif';
+	instructions.style.fontSize = '24px';
+	instructions.style.textAlign = 'center';
+	instructions.style.pointerEvents = 'none';
+	instructions.innerHTML = 'Click to Play<br>(WASD to move, Mouse to look)<br>LMB: Raise | RMB: Lower | Scroll: Size<br>G: Regrow grass';
+	document.body.appendChild(instructions);
+
+	document.addEventListener('click', () => {
+	  controls.lock();
+	});
+
+	controls.addEventListener('lock', () => {
+	  instructions.style.display = 'none';
+	});
+
+	controls.addEventListener('unlock', () => {
+	  instructions.style.display = 'block';
+	});
+
+	// Movement State
+	let moveForward = false;
+	let moveBackward = false;
+	let moveLeft = false;
+	let moveRight = false;
+	let canJump = false;
+
+	const velocity = new Vector3();
+	const direction = new Vector3();
+
+	const onKeyDown = function (event) {
+	  switch (event.code) {
+	    case 'ArrowUp':
+	    case 'KeyW':
+	      moveForward = true;
+	      break;
+	    case 'ArrowLeft':
+	    case 'KeyA':
+	      moveLeft = true;
+	      break;
+	    case 'ArrowDown':
+	    case 'KeyS':
+	      moveBackward = true;
+	      break;
+	    case 'ArrowRight':
+	    case 'KeyD':
+	      moveRight = true;
+	      break;
+	    case 'Space':
+	      if (canJump === true) velocity.y += 25; // was 350
+	      canJump = false;
+	      break;
+	    case 'KeyG':
+	      // Regenerate grass based on sculpted terrain
+	      regenerateGrassAsync();
+	      break;
+	  }
+	};
+
+	const onKeyUp = function (event) {
+	  switch (event.code) {
+	    case 'ArrowUp':
+	    case 'KeyW':
+	      moveForward = false;
+	      break;
+	    case 'ArrowLeft':
+	    case 'KeyA':
+	      moveLeft = false;
+	      break;
+	    case 'ArrowDown':
+	    case 'KeyS':
+	      moveBackward = false;
+	      break;
+	    case 'ArrowRight':
+	    case 'KeyD':
+	      moveRight = false;
+	      break;
+	  }
+	};
+
+	document.addEventListener('keydown', onKeyDown);
+	document.addEventListener('keyup', onKeyUp);
+
+	// Camera Initial Position
+	// Camera Initial Position
+	if (savedCamera) {
+	  camera.position.copy(savedCamera.position);
+	  camera.rotation.copy(savedCamera.rotation);
+	} else {
+	  camera.position.set(0, 5, 0); // Eye level
+	  camera.lookAt(0, 5, -10);
+	}
+
+	// Auto-save camera position frequently
+	setInterval(() => {
+	  if (camera) {
+	    const cameraData = {
+	      position: camera.position,
+	      rotation: camera.rotation
+	    };
+	    localStorage.setItem(STORAGE_KEY_CAMERA, JSON.stringify(cameraData));
+	  }
+	}, 1000);
+
 
 	// Grass Texture
 	const grassTexture = new TextureLoader().load('grass.jpg');
@@ -49469,11 +48288,16 @@
 	// Time Uniform
 	const startTime = Date.now();
 	const timeUniform = { type: 'f', value: 0.0 };
+	let prevTime = performance.now();
 
 	// Grass Shader
+	// GRASS_CANYON_THRESHOLD - grass disappears below this height
+	const GRASS_CANYON_THRESHOLD = -2.0; // Only hide grass in really deep canyons
+
 	const grassUniforms = {
 	  textures: { value: [grassTexture, cloudTexture] },
-	  iTime: timeUniform
+	  iTime: timeUniform,
+	  grassMinHeight: { value: GRASS_CANYON_THRESHOLD }
 	};
 
 	const grassMaterial = new ShaderMaterial({
@@ -49484,13 +48308,255 @@
 	  side: DoubleSide
 	});
 
-	generateField();
+	// Ground Shader (shares cloud texture with grass)
+	const groundUniforms = {
+	  cloudTexture: { value: cloudTexture },
+	  groundColor: { value: new Color(0x8B6914) }, // Mud brown
+	  iTime: timeUniform
+	};
+
+	const groundMaterial = new ShaderMaterial({
+	  uniforms: groundUniforms,
+	  vertexShader: groundShader.vert,
+	  fragmentShader: groundShader.frag,
+	  side: DoubleSide
+	});
+
+
+
+	// Lighting
+	const ambientLight = new AmbientLight(0xffffff, 0.5);
+	scene.add(ambientLight);
+
+	const dirLight = new DirectionalLight(0xffffff, 1.2);
+	dirLight.position.set(-50, 100, 50);
+	scene.add(dirLight);
+
+	// Fog & Background
+	// Matching the sky color to a soft, foggy green-blue
+	const skyColor = 0x62c1e5; 
+	scene.background = new Color(skyColor);
+	scene.fog = new FogExp2(skyColor, 0.0025);
+
+	// Cloud tracking for animation
+	const cloudMeshes = [];
+	const CLOUD_SPEED = { x: 0.5, z: 0.25 }; // Units per second
+	const CLOUD_HEIGHT = 25;
+	const CLOUD_AREA = 400; // How far clouds extend
+
+	// Terrain sculpting system - GOD MODE! 🎨
+	let groundMesh = null;
+	let grassMesh = null; // Reference to grass for regeneration
+	let brushRadius = 3.0; // Adjustable brush size
+	const BRUSH_MIN = 1.0;
+	const BRUSH_MAX = 10.0;
+	const SCULPT_STRENGTH = 0.8; // How much terrain moves per click
+	const raycaster = new Raycaster();
+	let isMouseDown = false;
+	let sculptMode = 0; // 0 = none, 1 = raise, -1 = lower
+	let isRegeneratingGrass = false;
+
+	// 3D Brush Cursor - ring that follows terrain
+	const cursorGeometry = new RingGeometry(0.9, 1.0, 32);
+	const cursorMaterial = new MeshBasicMaterial({
+	  color: 0xffffff,
+	  side: DoubleSide,
+	  transparent: true,
+	  opacity: 0.8,
+	  depthTest: false // Always visible on top
+	});
+	const brushCursor = new Mesh(cursorGeometry, cursorMaterial);
+	brushCursor.rotation.x = -Math.PI / 2; // Lay flat
+	brushCursor.visible = false;
+	scene.add(brushCursor);
+
+	function updateBrushCursor() {
+	  if (!groundMesh || !controls.isLocked) {
+	    brushCursor.visible = false;
+	    return;
+	  }
+	  
+	  // Raycast from camera center
+	  raycaster.setFromCamera(new Vector2(0, 0), camera);
+	  const intersects = raycaster.intersectObject(groundMesh);
+	  
+	  if (intersects.length > 0) {
+	    const hit = intersects[0];
+	    brushCursor.visible = true;
+	    brushCursor.position.copy(hit.point);
+	    brushCursor.position.y += 0.1; // Slightly above terrain
+	    
+	    // Scale to match brush radius
+	    brushCursor.scale.setScalar(brushRadius);
+	    
+	    // Color based on sculpt mode
+	    if (sculptMode === 1) {
+	      cursorMaterial.color.setHex(0x00ff00); // Green for raise
+	    } else if (sculptMode === -1) {
+	      cursorMaterial.color.setHex(0xff4444); // Red for lower
+	    } else {
+	      cursorMaterial.color.setHex(0xffffff); // White for neutral
+	    }
+	  } else {
+	    brushCursor.visible = false;
+	  }
+	}
+
+	// Brush UI
+	const brushUI = document.createElement('div');
+	brushUI.style.position = 'absolute';
+	brushUI.style.bottom = '20px';
+	brushUI.style.left = '50%';
+	brushUI.style.transform = 'translateX(-50%)';
+	brushUI.style.color = 'white';
+	brushUI.style.fontFamily = 'sans-serif';
+	brushUI.style.fontSize = '16px';
+	brushUI.style.textAlign = 'center';
+	brushUI.style.padding = '10px 20px';
+	brushUI.style.background = 'rgba(0,0,0,0.5)';
+	brushUI.style.borderRadius = '10px';
+	brushUI.style.display = 'none';
+	brushUI.style.pointerEvents = 'none';
+	document.body.appendChild(brushUI);
+
+	function updateBrushUI() {
+	  brushUI.innerHTML = `🎨 Brush Size: ${brushRadius.toFixed(1)} | LMB: Raise ⬆️ | RMB: Lower ⬇️`;
+	}
+	updateBrushUI();
+
+	// Show/hide brush UI based on controls lock
+	controls.addEventListener('lock', () => {
+	  brushUI.style.display = 'block';
+	  brushCursor.visible = true;
+	});
+	controls.addEventListener('unlock', () => {
+	  brushUI.style.display = 'none';
+	  brushCursor.visible = false;
+	});
+
+	generateEnvironment();
+	grassMesh = generateField(!!savedTerrain);
+	generateClouds();
+
+	// Sculpting mouse handlers
+	document.addEventListener('mousedown', (event) => {
+	  if (!controls.isLocked) return;
+	  
+	  if (event.button === 0) {
+	    sculptMode = 1; // Left click = raise
+	    isMouseDown = true;
+	  } else if (event.button === 2) {
+	    sculptMode = -1; // Right click = lower
+	    isMouseDown = true;
+	  }
+	});
+
+	document.addEventListener('mouseup', (event) => {
+	  if (event.button === 0 || event.button === 2) {
+	    isMouseDown = false;
+	    sculptMode = 0;
+	  }
+	});
+
+	// Scroll wheel for brush size
+	document.addEventListener('wheel', (event) => {
+	  if (!controls.isLocked) return;
+	  
+	  // Scroll up = bigger brush, scroll down = smaller
+	  brushRadius -= event.deltaY * 0.005;
+	  brushRadius = Math.max(BRUSH_MIN, Math.min(BRUSH_MAX, brushRadius));
+	  updateBrushUI();
+	});
+
+	// Prevent right-click context menu
+	document.addEventListener('contextmenu', (event) => {
+	  if (controls.isLocked) event.preventDefault();
+	});
 
 	const animate = function () {
+	  requestAnimationFrame(animate);
+
+	  const time = performance.now();
+	  const delta = (time - prevTime) / 1000;
+	  
 	  const elapsedTime = Date.now() - startTime;
-	  controls.update();
 	  grassUniforms.iTime.value = elapsedTime;
-	  window.requestAnimationFrame(animate);
+	  
+	  // Animate clouds overhead
+	  cloudMeshes.forEach(cloud => {
+	    cloud.position.x += CLOUD_SPEED.x * delta;
+	    cloud.position.z += CLOUD_SPEED.z * delta;
+	    
+	    // Wrap clouds around when they go too far
+	    if (cloud.position.x > CLOUD_AREA / 2) cloud.position.x = -CLOUD_AREA / 2;
+	    if (cloud.position.z > CLOUD_AREA / 2) cloud.position.z = -CLOUD_AREA / 2;
+	  });
+
+	    // Movement Logic
+	  if (controls.isLocked === true) {
+	    velocity.x -= velocity.x * 10.0 * delta;
+	    velocity.z -= velocity.z * 10.0 * delta;
+	    velocity.y -= 9.8 * 1 * delta; // 100.0 = mass
+
+	    direction.z = Number(moveForward) - Number(moveBackward);
+	    direction.x = Number(moveRight) - Number(moveLeft);
+	    direction.normalize();
+
+	    // Slower Speed (was 400.0)
+	    if (moveForward || moveBackward) velocity.z -= direction.z * 100.0 * delta;
+	    if (moveLeft || moveRight) velocity.x -= direction.x * 100.0 * delta;
+
+	    controls.moveRight(-velocity.x * delta);
+	    controls.moveForward(-velocity.z * delta);
+
+	    camera.position.y += (velocity.y * delta);
+
+	    // Terrain following - raycast down to find actual sculpted ground height
+	    const playerHeight = 1.5; // Eye level above ground
+	    let groundHeight = 0;
+	    
+	    if (groundMesh) {
+	      // Create a ray pointing straight down from above the player
+	      const rayOrigin = new Vector3(camera.position.x, 50, camera.position.z);
+	      const rayDirection = new Vector3(0, -1, 0);
+	      const groundRaycaster = new Raycaster(rayOrigin, rayDirection);
+	      
+	      const hits = groundRaycaster.intersectObject(groundMesh);
+	      if (hits.length > 0) {
+	        groundHeight = hits[0].point.y;
+	      }
+	    }
+	    
+	    const targetY = groundHeight + playerHeight;
+	    
+	    // Jump Physics - land on terrain
+	    if (camera.position.y < targetY) {
+	      velocity.y = 0;
+	      camera.position.y = targetY;
+	      canJump = true;
+	    }
+
+	    // Map Boundaries (PLANE_SIZE is 60, so +/- 30)
+	    const limit = PLANE_SIZE / 2; 
+	    if (camera.position.x < -limit) camera.position.x = -limit;
+	    if (camera.position.x > limit) camera.position.x = limit;
+	    if (camera.position.z < -limit) camera.position.z = -limit;
+	    if (camera.position.z > limit) camera.position.z = limit;
+	  }
+
+	  // Sculpt terrain while mouse is held
+	  if (isMouseDown && sculptMode !== 0) {
+	    sculptTerrain(sculptMode);
+	  }
+	  
+	  // NOTE: Auto grass regeneration disabled - too heavy, crashes browser
+	  // The grass stays as originally generated
+	  
+	  // Update brush cursor position
+	  updateBrushCursor();
+	  
+	  prevTime = time;
+
 	  renderer.render(scene, camera);
 	};
 
@@ -49506,13 +48572,181 @@
 	  return (((val - oldMin) * (newMax - newMin)) / (oldMax - oldMin)) + newMin;
 	}
 
-	function generateField () {
+	function generateEnvironment() {
+	  // Create a high-subdivision plane for smooth terrain
+	  const radius = PLANE_SIZE / 2;
+	  const subdivisions = 128; // High subdivision for smooth rolling hills
+	  
+	  // Use PlaneBufferGeometry with proper subdivisions
+	  const geometry = new PlaneBufferGeometry(
+	    PLANE_SIZE, PLANE_SIZE, 
+	    subdivisions, subdivisions
+	  );
+	  geometry.rotateX(-Math.PI / 2);
+	  
+	  // Apply terrain height and clip to circle
+	  const vertices = geometry.attributes.position.array;
+	  
+	  if (savedTerrain && savedTerrain.vertices && savedTerrain.vertices.length === vertices.length) {
+	    console.log('💾 Restoring saved terrain...');
+	    // Restore saved vertices
+	    for (let i = 0; i < vertices.length; i++) {
+	      vertices[i] = savedTerrain.vertices[i];
+	    }
+	  } else {
+	    // Standard Procedural Generation
+	    for (let i = 0; i < vertices.length; i += 3) {
+	      const x = vertices[i];
+	      const z = vertices[i + 2];
+	      const distFromCenter = Math.sqrt(x * x + z * z);
+	      
+	      // Only apply height within the circular area
+	      if (distFromCenter <= radius) {
+	        vertices[i + 1] = getTerrainHeight(x, z, radius);
+	      } else {
+	        // Push vertices outside circle down below view
+	        vertices[i + 1] = -100;
+	      }
+	    }
+	  }
+
+	  
+	  geometry.computeVertexNormals();
+	  
+	  // Use shader material with cloud shadows
+	  groundMesh = new Mesh(geometry, groundMaterial);
+	  groundMesh.position.y = -0.05; // Slightly below grass roots
+	  scene.add(groundMesh);
+	}
+
+	// ----------------------------------------------------------------------------
+	// Terrain Sculpting System - Paint your own landscape!
+	// ----------------------------------------------------------------------------
+
+	function sculptTerrain(direction) {
+	  if (!groundMesh) return;
+	  
+	  // Cast ray from camera center (crosshair)
+	  raycaster.setFromCamera(new Vector2(0, 0), camera);
+	  
+	  const intersects = raycaster.intersectObject(groundMesh);
+	  
+	  if (intersects.length > 0) {
+	    const hitPoint = intersects[0].point;
+	    
+	    // Get geometry and vertices
+	    const geometry = groundMesh.geometry;
+	    const positions = geometry.attributes.position.array;
+	    
+	    // Sculpt at the hit location
+	    for (let i = 0; i < positions.length; i += 3) {
+	      const vx = positions[i];
+	      positions[i + 1];
+	      const vz = positions[i + 2];
+	      
+	      // Calculate distance from hit point (in xz plane)
+	      const dx = vx - hitPoint.x;
+	      const dz = vz - hitPoint.z;
+	      const distance = Math.sqrt(dx * dx + dz * dz);
+	      
+	      // Only affect vertices within brush radius
+	      if (distance < brushRadius) {
+	        // Smooth falloff - stronger in center, weaker at edges
+	        const falloff = 1 - (distance / brushRadius);
+	        const smoothFalloff = falloff * falloff; // Quadratic for smooth sculpting
+	        
+	        // Raise or lower based on direction
+	        positions[i + 1] += direction * SCULPT_STRENGTH * smoothFalloff;
+	        
+	        // Clamp height to reasonable bounds
+	        positions[i + 1] = Math.max(-5, Math.min(15, positions[i + 1]));
+	      }
+	    }
+	    
+	    // Mark geometry as needing update
+	    geometry.attributes.position.needsUpdate = true;
+	    geometry.computeVertexNormals();
+
+	    // Trigger auto-save
+	    triggerSave();
+	  }
+	}
+
+	// Auto-save logic
+	let saveTimeout;
+	function triggerSave() {
+	  clearTimeout(saveTimeout);
+	  saveTimeout = setTimeout(() => {
+	    saveTerrainState(groundMesh);
+	  }, 1000);
+	}
+
+	function saveTerrainState(mesh) {
+	  if (!mesh) return;
+	  
+	  // Serialize only needed data
+	  const data = {
+	    seed: TERRAIN_SEED,
+	    vertices: Array.from(mesh.geometry.attributes.position.array)
+	  };
+	  
+	  try {
+	    localStorage.setItem(STORAGE_KEY_TERRAIN, JSON.stringify(data));
+	    console.log('💾 Terrain saved!');
+	  } catch (e) {
+	    console.error('Failed to save state', e);
+	  }
+	}
+
+	// ----------------------------------------------------------------------------
+	// Grass Field Generation
+	// ----------------------------------------------------------------------------
+
+	// Get height from actual terrain mesh vertices (fast, no raycasting!)
+	function getActualTerrainHeight(x, z) {
+	  if (!groundMesh) {
+	    return getTerrainHeight(x, z, PLANE_SIZE / 2);
+	  }
+	  
+	  // Sample from terrain mesh vertices directly (much faster than raycasting)
+	  const positions = groundMesh.geometry.attributes.position.array;
+	  const gridSize = 129; // subdivisions + 1
+	  const cellSize = PLANE_SIZE / 128;
+	  
+	  // Convert world x,z to grid indices
+	  const gridX = Math.floor((x + PLANE_SIZE / 2) / cellSize);
+	  const gridZ = Math.floor((z + PLANE_SIZE / 2) / cellSize);
+	  
+	  // Clamp to valid range
+	  const clampedX = Math.max(0, Math.min(gridSize - 1, gridX));
+	  const clampedZ = Math.max(0, Math.min(gridSize - 1, gridZ));
+	  
+	  // Get vertex index (y is at position i*3 + 1)
+	  const vertexIndex = clampedZ * gridSize + clampedX;
+	  const yIndex = vertexIndex * 3 + 1;
+	  
+	  if (yIndex < positions.length) {
+	    return positions[yIndex] + groundMesh.position.y;
+	  }
+	  
+	  return getTerrainHeight(x, z, PLANE_SIZE / 2);
+	}
+
+	function generateField(useSculptedTerrain = false) {
 	  const positions = [];
 	  const uvs = [];
 	  const indices = [];
 	  const colors = [];
 
-	  for (let i = 0; i < BLADE_COUNT; i++) {
+	  let bladesGenerated = 0;
+	  // Use WAY fewer blades when regenerating to avoid browser hang
+	  const targetBlades = useSculptedTerrain ? 50000 : BLADE_COUNT;
+	  let attempts = 0;
+	  const maxAttempts = targetBlades * 2;
+	  
+	  while (bladesGenerated < targetBlades && attempts < maxAttempts) {
+	    attempts++;
+	    
 	    const VERTEX_COUNT = 5;
 	    const surfaceMin = PLANE_SIZE / 2 * -1;
 	    const surfaceMax = PLANE_SIZE / 2;
@@ -49521,19 +48755,42 @@
 	    const r = radius * Math.sqrt(Math.random());
 	    const theta = Math.random() * 2 * Math.PI;
 	    const x = r * Math.cos(theta);
-	    const y = r * Math.sin(theta);
+	    const z = r * Math.sin(theta);
+	    
+	    // Use sculpted terrain or procedural based on flag
+	    const finalHeight = useSculptedTerrain 
+	      ? getActualTerrainHeight(x, z)
+	      : getTerrainHeight(x, z, radius);
+	    
+	    // Skip grass on high peaks (bare mud!) with fuzzy transition
+	    const heightThreshold = GRASS_HEIGHT_THRESHOLD + (Math.random() - 0.5) * 1.5;
+	    if (finalHeight > heightThreshold) {
+	      continue; // No grass here - bare peak!
+	    }
+	    
+	    // Skip grass below canyon threshold
+	    if (finalHeight < GRASS_CANYON_THRESHOLD) {
+	      continue; // Too low - canyon floor!
+	    }
+	    
+	    // Additional random thinning for less uniformity
+	    const slopeNoise = terrainPerlin.noise(x * 0.15, z * 0.15, 5.0);
+	    if (Math.random() > 0.7 + slopeNoise * 0.3) {
+	      continue; // Random thin out for natural look
+	    }
 
-	    const pos = new Vector3(x, 0, y);
+	    const pos = new Vector3(x, finalHeight, z);
 
 	    const uv = [convertRange(pos.x, surfaceMin, surfaceMax, 0, 1), convertRange(pos.z, surfaceMin, surfaceMax, 0, 1)];
 
-	    const blade = generateBlade(pos, i * VERTEX_COUNT, uv);
+	    const blade = generateBlade(pos, bladesGenerated * VERTEX_COUNT, uv);
 	    blade.verts.forEach(vert => {
 	      positions.push(...vert.pos);
 	      uvs.push(...vert.uv);
 	      colors.push(...vert.color);
 	    });
 	    blade.indices.forEach(indice => indices.push(indice));
+	    bladesGenerated++;
 	  }
 
 	  const geom = new BufferGeometry();
@@ -49546,6 +48803,105 @@
 
 	  const mesh = new Mesh(geom, grassMaterial);
 	  scene.add(mesh);
+	  
+	  return mesh; // Return reference for regeneration
+	}
+
+	// Async chunked grass regeneration - spreads work across frames to prevent freezing
+	const REGEN_BLADES_PER_FRAME = 2000; // Generate this many blades per frame
+	const REGEN_TOTAL_BLADES = 30000; // Total blades when regenerating (fewer for performance)
+
+	function regenerateGrassAsync() {
+	  if (isRegeneratingGrass) return; // Already regenerating
+	  
+	  console.log('🌿 Starting async grass regeneration...');
+	  isRegeneratingGrass = true;
+	  
+	  // Remove old grass
+	  if (grassMesh) {
+	    scene.remove(grassMesh);
+	    grassMesh.geometry.dispose();
+	    grassMesh = null;
+	  }
+	  
+	  // State for chunked generation
+	  const positions = [];
+	  const uvs = [];
+	  const indices = [];
+	  const colors = [];
+	  let bladesGenerated = 0;
+	  let attempts = 0;
+	  const maxAttempts = REGEN_TOTAL_BLADES * 2;
+	  
+	  function generateChunk() {
+	    performance.now();
+	    const bladesToGenerate = Math.min(REGEN_BLADES_PER_FRAME, REGEN_TOTAL_BLADES - bladesGenerated);
+	    let bladesThisChunk = 0;
+	    
+	    while (bladesThisChunk < bladesToGenerate && attempts < maxAttempts) {
+	      attempts++;
+	      
+	      const VERTEX_COUNT = 5;
+	      const surfaceMin = PLANE_SIZE / 2 * -1;
+	      const surfaceMax = PLANE_SIZE / 2;
+	      const radius = PLANE_SIZE / 2;
+
+	      const r = radius * Math.sqrt(Math.random());
+	      const theta = Math.random() * 2 * Math.PI;
+	      const x = r * Math.cos(theta);
+	      const z = r * Math.sin(theta);
+	      
+	      // Get height from sculpted terrain
+	      const finalHeight = getActualTerrainHeight(x, z);
+	      
+	      // Skip grass on high peaks
+	      const heightThreshold = GRASS_HEIGHT_THRESHOLD + (Math.random() - 0.5) * 1.5;
+	      if (finalHeight > heightThreshold) continue;
+	      
+	      // Skip grass below canyon threshold
+	      if (finalHeight < GRASS_CANYON_THRESHOLD) continue;
+	      
+	      // Random thinning
+	      const slopeNoise = terrainPerlin.noise(x * 0.15, z * 0.15, 5.0);
+	      if (Math.random() > 0.7 + slopeNoise * 0.3) continue;
+
+	      const pos = new Vector3(x, finalHeight, z);
+	      const uv = [convertRange(pos.x, surfaceMin, surfaceMax, 0, 1), convertRange(pos.z, surfaceMin, surfaceMax, 0, 1)];
+
+	      const blade = generateBlade(pos, bladesGenerated * VERTEX_COUNT, uv);
+	      blade.verts.forEach(vert => {
+	        positions.push(...vert.pos);
+	        uvs.push(...vert.uv);
+	        colors.push(...vert.color);
+	      });
+	      blade.indices.forEach(indice => indices.push(indice));
+	      bladesGenerated++;
+	      bladesThisChunk++;
+	    }
+	    
+	    // Check if done
+	    if (bladesGenerated >= REGEN_TOTAL_BLADES || attempts >= maxAttempts) {
+	      // Finalize mesh
+	      const geom = new BufferGeometry();
+	      geom.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+	      geom.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+	      geom.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
+	      geom.setIndex(indices);
+	      geom.computeVertexNormals();
+	      
+	      grassMesh = new Mesh(geom, grassMaterial);
+	      scene.add(grassMesh);
+	      
+	      isRegeneratingGrass = false;
+	      console.log(`🌿 Grass regenerated! ${bladesGenerated} blades`);
+	    } else {
+	      // Continue next frame
+	      requestAnimationFrame(generateChunk);
+	    }
+	  }
+	  
+	  // Start generating
+	  requestAnimationFrame(generateChunk);
 	}
 
 	function generateBlade (center, vArrOffset, uv) {
@@ -49590,11 +48946,52 @@
 	    vArrOffset + 4,
 	    vArrOffset + 3,
 	    vArrOffset + 3,
-	    vArrOffset,
+	    vArrOffset + 1,
 	    vArrOffset + 2
 	  ];
 
 	  return { verts, indices };
 	}
 
-}());
+	// ----------------------------------------------------------------------------
+	// 3D Cloud Generation - Visible clouds that match the shadow texture!
+	// ----------------------------------------------------------------------------
+
+	function generateClouds() {
+	  const cloudGeometry = new PlaneBufferGeometry(150, 150);
+	  
+	  // Create multiple cloud layers at different heights and positions
+	  const cloudConfigs = [
+	    { x: 0, y: CLOUD_HEIGHT, z: 0, scale: 1.0, opacity: 0.7 },
+	    { x: -80, y: CLOUD_HEIGHT + 15, z: -40, scale: 1.2, opacity: 0.6 },
+	    { x: 60, y: CLOUD_HEIGHT + 8, z: 50, scale: 0.9, opacity: 0.65 },
+	    { x: -30, y: CLOUD_HEIGHT + 20, z: 80, scale: 1.1, opacity: 0.55 },
+	    { x: 100, y: CLOUD_HEIGHT + 5, z: -60, scale: 1.3, opacity: 0.6 },
+	    { x: -100, y: CLOUD_HEIGHT + 12, z: 30, scale: 1.0, opacity: 0.7 },
+	  ];
+	  
+	  cloudConfigs.forEach(config => {
+	    // Custom shader material - makes light areas transparent!
+	    const cloudMat = new ShaderMaterial({
+	      uniforms: {
+	        cloudTexture: { value: cloudTexture },
+	        opacity: { value: config.opacity }
+	      },
+	      vertexShader: cloudShader.vert,
+	      fragmentShader: cloudShader.frag,
+	      transparent: true,
+	      side: DoubleSide,
+	      depthWrite: false
+	    });
+	    
+	    const cloud = new Mesh(cloudGeometry, cloudMat);
+	    cloud.rotation.x = -Math.PI / 2; // Face down
+	    cloud.position.set(config.x, config.y, config.z);
+	    cloud.scale.setScalar(config.scale);
+	    
+	    scene.add(cloud);
+	    cloudMeshes.push(cloud);
+	  });
+	}
+
+})();
