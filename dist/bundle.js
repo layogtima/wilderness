@@ -48098,23 +48098,36 @@
 	const TERRAIN_PLATEAU_HEIGHT = 2.0; // Higher base dome
 	const GRASS_HEIGHT_THRESHOLD = 3.5; // No grass above this height (bare peaks!)
 
-	// Persistence
-	const STORAGE_KEY = 'terrainator_v1';
+	// Persistence Keys
+	const STORAGE_KEY_TERRAIN = 'terrainator_terrain_v1';
+	const STORAGE_KEY_CAMERA = 'terrainator_camera_v1';
 
-	function loadState() {
+	function loadTerrainState() {
 	  try {
-	    const data = localStorage.getItem(STORAGE_KEY);
+	    const data = localStorage.getItem(STORAGE_KEY_TERRAIN);
 	    if (data) return JSON.parse(data);
 	  } catch (e) {
-	    console.error('Failed to load state', e);
+	    console.error('Failed to load terrain state', e);
 	  }
 	  return null;
 	}
 
-	const savedState = loadState();
+	function loadCameraState() {
+	  try {
+	    const data = localStorage.getItem(STORAGE_KEY_CAMERA);
+	    if (data) return JSON.parse(data);
+	  } catch (e) {
+	    console.error('Failed to load camera state', e);
+	  }
+	  return null;
+	}
+
+	const savedTerrain = loadTerrainState();
+	const savedCamera = loadCameraState();
 
 	// Random terrain seed - changes every refresh!
-	const TERRAIN_SEED = savedState ? savedState.seed : Math.random() * 1000;
+	const TERRAIN_SEED = savedTerrain ? savedTerrain.seed : Math.random() * 1000;
+
 
 
 	// Get terrain height at any x,z position
@@ -48246,8 +48259,26 @@
 	document.addEventListener('keyup', onKeyUp);
 
 	// Camera Initial Position
-	camera.position.set(0, 5, 0); // Eye level
-	camera.lookAt(0, 5, -10);
+	// Camera Initial Position
+	if (savedCamera) {
+	  camera.position.copy(savedCamera.position);
+	  camera.rotation.copy(savedCamera.rotation);
+	} else {
+	  camera.position.set(0, 5, 0); // Eye level
+	  camera.lookAt(0, 5, -10);
+	}
+
+	// Auto-save camera position frequently
+	setInterval(() => {
+	  if (camera) {
+	    const cameraData = {
+	      position: camera.position,
+	      rotation: camera.rotation
+	    };
+	    localStorage.setItem(STORAGE_KEY_CAMERA, JSON.stringify(cameraData));
+	  }
+	}, 1000);
+
 
 	// Grass Texture
 	const grassTexture = new TextureLoader().load('grass.jpg');
@@ -48404,7 +48435,7 @@
 	});
 
 	generateEnvironment();
-	grassMesh = generateField();
+	grassMesh = generateField(!!savedTerrain);
 	generateClouds();
 
 	// Sculpting mouse handlers
@@ -48556,11 +48587,11 @@
 	  // Apply terrain height and clip to circle
 	  const vertices = geometry.attributes.position.array;
 	  
-	  if (savedState && savedState.vertices && savedState.vertices.length === vertices.length) {
+	  if (savedTerrain && savedTerrain.vertices && savedTerrain.vertices.length === vertices.length) {
 	    console.log('💾 Restoring saved terrain...');
 	    // Restore saved vertices
 	    for (let i = 0; i < vertices.length; i++) {
-	      vertices[i] = savedState.vertices[i];
+	      vertices[i] = savedTerrain.vertices[i];
 	    }
 	  } else {
 	    // Standard Procedural Generation
@@ -48646,11 +48677,11 @@
 	function triggerSave() {
 	  clearTimeout(saveTimeout);
 	  saveTimeout = setTimeout(() => {
-	    saveState(groundMesh);
+	    saveTerrainState(groundMesh);
 	  }, 1000);
 	}
 
-	function saveState(mesh) {
+	function saveTerrainState(mesh) {
 	  if (!mesh) return;
 	  
 	  // Serialize only needed data
@@ -48660,11 +48691,8 @@
 	  };
 	  
 	  try {
-	    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+	    localStorage.setItem(STORAGE_KEY_TERRAIN, JSON.stringify(data));
 	    console.log('💾 Terrain saved!');
-	    
-	    // Also trigger grass regen after save if needed
-	    // regenerateGrassAsync(); // Optional: might be too heavy to do automatically
 	  } catch (e) {
 	    console.error('Failed to save state', e);
 	  }
