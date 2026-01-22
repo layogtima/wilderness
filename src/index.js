@@ -12,8 +12,24 @@ const TERRAIN_HEIGHT_SCALE = 8.0; // MUCH more dramatic hills!
 const TERRAIN_PLATEAU_HEIGHT = 2.0; // Higher base dome
 const GRASS_HEIGHT_THRESHOLD = 3.5; // No grass above this height (bare peaks!)
 
+// Persistence
+const STORAGE_KEY = 'terrainator_v1';
+
+function loadState() {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (data) return JSON.parse(data);
+  } catch (e) {
+    console.error('Failed to load state', e);
+  }
+  return null;
+}
+
+const savedState = loadState();
+
 // Random terrain seed - changes every refresh!
-const TERRAIN_SEED = Math.random() * 1000;
+const TERRAIN_SEED = savedState ? savedState.seed : Math.random() * 1000;
+
 
 // Get terrain height at any x,z position
 function getTerrainHeight(x, z, radius) {
@@ -460,19 +476,29 @@ function generateEnvironment() {
   // Apply terrain height and clip to circle
   const vertices = geometry.attributes.position.array;
   
-  for (let i = 0; i < vertices.length; i += 3) {
-    const x = vertices[i];
-    const z = vertices[i + 2];
-    const distFromCenter = Math.sqrt(x * x + z * z);
-    
-    // Only apply height within the circular area
-    if (distFromCenter <= radius) {
-      vertices[i + 1] = getTerrainHeight(x, z, radius);
-    } else {
-      // Push vertices outside circle down below view
-      vertices[i + 1] = -100;
+  if (savedState && savedState.vertices && savedState.vertices.length === vertices.length) {
+    console.log('💾 Restoring saved terrain...');
+    // Restore saved vertices
+    for (let i = 0; i < vertices.length; i++) {
+      vertices[i] = savedState.vertices[i];
+    }
+  } else {
+    // Standard Procedural Generation
+    for (let i = 0; i < vertices.length; i += 3) {
+      const x = vertices[i];
+      const z = vertices[i + 2];
+      const distFromCenter = Math.sqrt(x * x + z * z);
+      
+      // Only apply height within the circular area
+      if (distFromCenter <= radius) {
+        vertices[i + 1] = getTerrainHeight(x, z, radius);
+      } else {
+        // Push vertices outside circle down below view
+        vertices[i + 1] = -100;
+      }
     }
   }
+
   
   geometry.computeVertexNormals();
   
@@ -529,6 +555,38 @@ function sculptTerrain(direction) {
     // Mark geometry as needing update
     geometry.attributes.position.needsUpdate = true;
     geometry.computeVertexNormals();
+
+    // Trigger auto-save
+    triggerSave();
+  }
+}
+
+// Auto-save logic
+let saveTimeout;
+function triggerSave() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveState(groundMesh);
+  }, 1000);
+}
+
+function saveState(mesh) {
+  if (!mesh) return;
+  
+  // Serialize only needed data
+  const data = {
+    seed: TERRAIN_SEED,
+    vertices: Array.from(mesh.geometry.attributes.position.array)
+  };
+  
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    console.log('💾 Terrain saved!');
+    
+    // Also trigger grass regen after save if needed
+    // regenerateGrassAsync(); // Optional: might be too heavy to do automatically
+  } catch (e) {
+    console.error('Failed to save state', e);
   }
 }
 
